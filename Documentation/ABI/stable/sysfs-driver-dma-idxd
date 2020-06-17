@@ -129,6 +129,12 @@ KernelVersion:	5.10.0
 Contact:	dmaengine@vger.kernel.org
 Description:	The last executed device administrative command's status/error.
 
+What:		/sys/bus/dsa/devices/dsa<m>/ims_size
+Date:		May 3, 2021
+KernelVersion:	5.14.0
+Contact:	dmaengine@vger.kernel.org
+Description:	The total number of vectors available for Interrupt Message Store.
+
 What:		/sys/bus/dsa/devices/wq<m>.<n>/block_on_fault
 Date:		Oct 27, 2020
 KernelVersion:	5.11.0
