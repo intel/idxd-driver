@@ -75,8 +75,10 @@ void vidxd_init(struct vdcm_idxd *vidxd)
 
 	vidxd_mmio_init(vidxd);
 
-	if (wq_dedicated(wq) && wq->state == IDXD_WQ_ENABLED)
+	if (wq_dedicated(wq) && wq->state == IDXD_WQ_ENABLED) {
 		idxd_wq_disable(wq);
+		wq->state = IDXD_WQ_LOCKED;
+	}
 }
 
 void vidxd_send_interrupt(struct vdcm_idxd *vidxd, int vector)

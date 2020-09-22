@@ -894,6 +894,11 @@ static void idxd_mdev_drv_remove(struct device *dev)
 	struct idxd_device *idxd = wq->idxd;
 
 	drv_disable_wq(wq);
+	mutex_lock(&wq->wq_lock);
+	if (wq->state == IDXD_WQ_LOCKED)
+		wq->state = IDXD_WQ_DISABLED;
+	mutex_unlock(&wq->wq_lock);
+
 	dev_info(dev, "wq %s disabled\n", dev_name(dev));
 	kref_put_mutex(&idxd->mdev_kref, idxd_mdev_host_release, &idxd->kref_lock);
 	put_device(dev);

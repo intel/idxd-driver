@@ -243,6 +243,14 @@ int idxd_wq_disable(struct idxd_wq *wq)
 
 	dev_dbg(dev, "Disabling WQ %d\n", wq->id);
 
+	/*
+	 * When the wq is in LOCKED state, it means it is disabled but
+	 * also at the same time is "enabled" as far as the user is
+	 * concerned. So a call to disable the hardware can be skipped.
+	 */
+	if (wq->state == IDXD_WQ_LOCKED)
+		return 0;
+
 	if (wq->state != IDXD_WQ_ENABLED) {
 		dev_dbg(dev, "WQ %d in wrong state: %d\n", wq->id, wq->state);
 		return 0;
@@ -284,6 +292,14 @@ void idxd_wq_reset(struct idxd_wq *wq)
 	struct idxd_device *idxd = wq->idxd;
 	struct device *dev = &idxd->pdev->dev;
 	u32 operand;
+
+	/*
+	 * When the wq is in LOCKED state, it means it is disabled but
+	 * also at the same time is "enabled" as far as the user is
+	 * concerned. So a call to reset the hardware can be skipped.
+	 */
+	if (wq->state == IDXD_WQ_LOCKED)
+		return;
 
 	if (wq->state != IDXD_WQ_ENABLED) {
 		dev_dbg(dev, "WQ %d in wrong state: %d\n", wq->id, wq->state);

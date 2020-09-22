@@ -584,6 +584,8 @@ static ssize_t wq_state_show(struct device *dev,
 		return sysfs_emit(buf, "disabled\n");
 	case IDXD_WQ_ENABLED:
 		return sysfs_emit(buf, "enabled\n");
+	case IDXD_WQ_LOCKED:
+		return sysfs_emit(buf, "locked\n");
 	}
 
 	return sysfs_emit(buf, "unknown\n");
