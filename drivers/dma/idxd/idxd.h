@@ -129,6 +129,7 @@ enum idxd_wq_type {
 	IDXD_WQT_NONE = 0,
 	IDXD_WQT_KERNEL,
 	IDXD_WQT_USER,
+	IDXD_WQT_MDEV,
 };
 
 struct idxd_cdev {
@@ -422,6 +423,11 @@ static inline bool is_idxd_wq_dmaengine(struct idxd_wq *wq)
 static inline bool is_idxd_wq_user(struct idxd_wq *wq)
 {
 	return wq->type == IDXD_WQT_USER;
+}
+
+static inline bool is_idxd_wq_mdev(struct idxd_wq *wq)
+{
+	return (wq->type == IDXD_WQT_MDEV);
 }
 
 static inline bool wq_dedicated(struct idxd_wq *wq)
