@@ -50,10 +50,17 @@ enum idxd_type {
 #define IDXD_NAME_SIZE		128
 #define IDXD_PMU_EVENT_MAX	64
 
+struct idxd_wq;
+
+struct idxd_device_ops {
+	void (*notify_error)(struct idxd_wq *wq);
+};
+
 struct idxd_device_driver {
 	const char *name;
 	int (*probe)(struct device *dev);
 	void (*remove)(struct device *dev);
+	struct idxd_device_ops *ops;
 	struct device_driver drv;
 };
 

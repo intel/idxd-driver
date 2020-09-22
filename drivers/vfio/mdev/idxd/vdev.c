@@ -151,6 +151,29 @@ static void vidxd_report_swerror(struct vdcm_idxd *vidxd, unsigned int error)
 	send_swerr_interrupt(vidxd);
 }
 
+void idxd_wq_vidxd_send_errors(struct idxd_wq *wq)
+{
+	struct vdcm_idxd *vidxd = wq->vidxd;
+	struct idxd_device *idxd = vidxd->idxd;
+	u8 *bar0 = vidxd->bar0;
+	union sw_err_reg *swerr = (union sw_err_reg *)(bar0 + IDXD_SWERR_OFFSET);
+	int i;
+
+	if (swerr->valid) {
+		if (!swerr->overflow) {
+			swerr->overflow = 1;
+			send_swerr_interrupt(vidxd);
+		}
+		return;
+	}
+
+	lockdep_assert_held(&idxd->dev_lock);
+	for (i = 0; i < 4; i++)
+		swerr->bits[i] = idxd->sw_err.bits[i];
+
+	send_swerr_interrupt(vidxd);
+}
+
 int vidxd_mmio_write(struct vdcm_idxd *vidxd, u64 pos, void *buf, unsigned int size)
 {
 	u32 offset = pos & (vidxd->bar_size[0] - 1);

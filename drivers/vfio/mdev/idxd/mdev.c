@@ -904,10 +904,15 @@ static void idxd_mdev_drv_remove(struct device *dev)
 	put_device(dev);
 }
 
+static struct idxd_device_ops mdev_wq_ops = {
+	.notify_error = idxd_wq_vidxd_send_errors,
+};
+
 static struct idxd_device_driver idxd_mdev_driver = {
 	.probe = idxd_mdev_drv_probe,
 	.remove = idxd_mdev_drv_remove,
 	.name = idxd_mdev_drv_name,
+	.ops = &mdev_wq_ops,
 };
 
 static int __init idxd_mdev_init(void)

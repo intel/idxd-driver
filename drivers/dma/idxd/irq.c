@@ -104,6 +104,7 @@ static int idxd_device_schedule_fault_process(struct idxd_device *idxd,
 
 static int process_misc_interrupts(struct idxd_device *idxd, u32 cause)
 {
+	struct idxd_device_driver *wq_drv;
 	struct device *dev = &idxd->pdev->dev;
 	union gensts_reg gensts;
 	u32 val = 0;
@@ -123,16 +124,32 @@ static int process_misc_interrupts(struct idxd_device *idxd, u32 cause)
 			int id = idxd->sw_err.wq_idx;
 			struct idxd_wq *wq = idxd->wqs[id];
 
-			if (wq->type == IDXD_WQT_USER)
+			if (is_idxd_wq_user(wq)) {
 				wake_up_interruptible(&wq->err_queue);
+			} else if (is_idxd_wq_mdev(wq)) {
+				struct device *conf_dev = wq_confdev(wq);
+				struct device_driver *drv = conf_dev->driver;
+
+				wq_drv = container_of(drv, struct idxd_device_driver, drv);
+				if (wq_drv)
+					wq_drv->ops->notify_error(wq);
+			}
 		} else {
 			int i;
 
 			for (i = 0; i < idxd->max_wqs; i++) {
 				struct idxd_wq *wq = idxd->wqs[i];
 
-				if (wq->type == IDXD_WQT_USER)
+				if (is_idxd_wq_user(wq)) {
 					wake_up_interruptible(&wq->err_queue);
+				} else if (is_idxd_wq_mdev(wq)) {
+					struct device *conf_dev = wq_confdev(wq);
+					struct device_driver *drv = conf_dev->driver;
+
+					wq_drv = container_of(drv, struct idxd_device_driver, drv);
+					if (wq_drv)
+						wq_drv->ops->notify_error(wq);
+				}
 			}
 		}
 

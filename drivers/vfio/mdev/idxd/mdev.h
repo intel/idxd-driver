@@ -107,5 +107,6 @@ int vidxd_cfg_read(struct vdcm_idxd *vidxd, unsigned int pos, void *buf, unsigne
 int vidxd_cfg_write(struct vdcm_idxd *vidxd, unsigned int pos, void *buf, unsigned int size);
 int vidxd_mmio_write(struct vdcm_idxd *vidxd, u64 pos, void *buf, unsigned int size);
 int vidxd_mmio_read(struct vdcm_idxd *vidxd, u64 pos, void *buf, unsigned int size);
+void idxd_wq_vidxd_send_errors(struct idxd_wq *wq);
 
 #endif
