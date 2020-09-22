@@ -18878,6 +18878,13 @@ F:	drivers/vfio/mdev/
 F:	include/linux/mdev.h
 F:	samples/vfio-mdev/
 
+VFIO MEDIATED DEVICE IDXD DRIVER
+M:	Dave Jiang <dave.jiang@intel.com>
+L:	kvm@vger.kernel.org
+S:	Maintained
+F:	Documentation/driver-api/vfio/mdev-idxd.rst
+F:	drivers/vfio/mdev/idxd/
+
 VFIO PLATFORM DRIVER
 M:	Eric Auger <eric.auger@redhat.com>
 L:	kvm@vger.kernel.org
