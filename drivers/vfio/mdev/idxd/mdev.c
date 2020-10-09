@@ -111,6 +111,7 @@ static struct vdcm_idxd *vdcm_vidxd_create(struct idxd_device *idxd, struct mdev
 					   struct vdcm_idxd_type *type)
 {
 	struct vdcm_idxd *vidxd;
+	struct device *dev = &mdev->dev;
 	struct idxd_wq *wq = NULL;
 	int rc;
 
@@ -129,6 +130,7 @@ static struct vdcm_idxd *vdcm_vidxd_create(struct idxd_device *idxd, struct mdev
 	vidxd->mdev = mdev;
 	vidxd->type = type;
 	vidxd->num_wqs = VIDXD_MAX_WQS;
+	dev_set_msi_domain(dev, idxd->ims_domain);
 
 	mutex_lock(&wq->wq_lock);
 	idxd_wq_get(wq);

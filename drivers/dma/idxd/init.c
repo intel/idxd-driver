@@ -16,6 +16,8 @@
 #include <linux/idr.h>
 #include <linux/intel-svm.h>
 #include <linux/iommu.h>
+#include <linux/irqdomain.h>
+#include <linux/irqchip/irq-ims-msi.h>
 #include <uapi/linux/idxd.h>
 #include <linux/dmaengine.h>
 #include "../dmaengine.h"
@@ -66,6 +68,7 @@ MODULE_DEVICE_TABLE(pci, idxd_pci_tbl);
 int idxd_mdev_host_init(struct idxd_device *idxd, struct mdev_driver *drv)
 {
 	struct device *dev = &idxd->pdev->dev;
+	struct ims_array_info ims_info;
 	int rc;
 
 	if (!idxd->ims_size)
@@ -77,8 +80,18 @@ int idxd_mdev_host_init(struct idxd_device *idxd, struct mdev_driver *drv)
 		return rc;
 	}
 
+	ims_info.max_slots = idxd->ims_size;
+	ims_info.slots = idxd->reg_base + idxd->ims_offset;
+	idxd->ims_domain = pci_ims_array_create_msi_irq_domain(idxd->pdev, &ims_info);
+	if (!idxd->ims_domain) {
+		dev_warn(dev, "Fail to acquire IMS domain\n");
+		iommu_dev_disable_feature(dev, IOMMU_DEV_FEAT_AUX);
+		return -ENODEV;
+	}
+
 	rc = mdev_register_device(dev, drv);
 	if (rc < 0) {
+		irq_domain_remove(idxd->ims_domain);
 		iommu_dev_disable_feature(dev, IOMMU_DEV_FEAT_AUX);
 		return rc;
 	}
@@ -93,6 +106,7 @@ void idxd_mdev_host_release(struct kref *kref)
 	struct idxd_device *idxd = container_of(kref, struct idxd_device, mdev_kref);
 	struct device *dev = &idxd->pdev->dev;
 
+	irq_domain_remove(idxd->ims_domain);
 	mdev_unregister_device(dev);
 	iommu_dev_disable_feature(dev, IOMMU_DEV_FEAT_AUX);
 }

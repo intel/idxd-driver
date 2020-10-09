@@ -297,6 +297,7 @@ struct idxd_device {
 	struct workqueue_struct *wq;
 	struct work_struct work;
 
+	struct irq_domain *ims_domain;
 	int *int_handles;
 
 	struct idxd_pmu *idxd_pmu;
