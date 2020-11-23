@@ -519,6 +519,11 @@ struct irq_domain *device_msi_create_irq_domain(struct fwnode_handle *fn,
 #ifdef CONFIG_PCI
 #include <linux/pci.h>
 
+bool __weak arch_support_pci_device_msi(struct pci_dev *pdev)
+{
+	return false;
+}
+
 /**
  * pci_subdevice_msi_create_irq_domain - Create an irq domain for subdevices
  * @pdev:	Pointer to PCI device for which the subdevice domain is created
@@ -529,6 +534,9 @@ struct irq_domain *pci_subdevice_msi_create_irq_domain(struct pci_dev *pdev,
 {
 	struct irq_domain *domain, *pdev_msi;
 	struct fwnode_handle *fn;
+
+	if (!arch_support_pci_device_msi(pdev))
+		return NULL;
 
 	/*
 	 * Retrieve the MSI domain of the underlying PCI device's MSI
