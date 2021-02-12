@@ -198,6 +198,7 @@ struct idxd_wq {
 	u64 max_xfer_bytes;
 	u32 max_batch_size;
 	bool ats_dis;
+	struct vdcm_idxd *vidxd;
 };
 
 struct idxd_engine {

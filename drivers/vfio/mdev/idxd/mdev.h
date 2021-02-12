@@ -30,11 +30,26 @@
 #define VIDXD_MAX_MSIX_ENTRIES		VIDXD_MAX_MSIX_VECS
 #define VIDXD_MAX_WQS			1
 
+#define IDXD_MDEV_NAME_LEN		64
+#define IDXD_MDEV_TYPES			2
+
+enum idxd_mdev_type {
+	IDXD_MDEV_TYPE_DSA_1_DWQ = 0,
+	IDXD_MDEV_TYPE_IAX_1_DWQ,
+};
+
+struct vdcm_idxd_type {
+	const char *name;
+	enum idxd_mdev_type type;
+	unsigned int avail_instance;
+};
+
 struct vdcm_idxd {
 	struct vfio_device vdev;
 	struct idxd_device *idxd;
 	struct idxd_wq *wq;
 	struct mdev_device *mdev;
+	struct vdcm_idxd_type *type;
 	int num_wqs;
 
 	u64 bar_val[VIDXD_MAX_BARS];
@@ -43,6 +58,16 @@ struct vdcm_idxd {
 	u8 bar0[VIDXD_MAX_MMIO_SPACE_SZ];
 	struct mutex dev_lock; /* lock for vidxd resources */
 };
+
+enum idxd_vdcm_rw {
+	IDXD_VDCM_READ = 0,
+	IDXD_VDCM_WRITE,
+};
+
+static inline struct vdcm_idxd *vdev_to_vidxd(struct vfio_device *vdev)
+{
+	return container_of(vdev, struct vdcm_idxd, vdev);
+}
 
 static inline u64 get_reg_val(void *buf, int size)
 {
