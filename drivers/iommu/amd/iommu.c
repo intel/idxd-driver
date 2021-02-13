@@ -2140,6 +2140,8 @@ static bool amd_iommu_capable(enum iommu_cap cap)
 		return (irq_remapping_enabled == 1);
 	case IOMMU_CAP_NOEXEC:
 		return false;
+	case IOMMU_CAP_VIOMMU_HINT:
+		return amd_iommu_np_cache;
 	default:
 		break;
 	}
