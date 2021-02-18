@@ -46,7 +46,6 @@ static struct vfio {
 	struct mutex			group_lock;
 	struct cdev			group_cdev;
 	dev_t				group_devt;
-	wait_queue_head_t		release_q;
 } vfio;
 
 struct vfio_iommu_driver {
@@ -91,7 +90,8 @@ struct vfio_group {
 };
 
 struct vfio_device {
-	struct kref			kref;
+	refcount_t			refcount;
+	struct completion		comp;
 	struct device			*dev;
 	const struct vfio_device_ops	*ops;
 	struct vfio_group		*group;
@@ -544,14 +544,18 @@ struct vfio_device *vfio_group_create_device(struct vfio_group *group,
 	if (!device)
 		return ERR_PTR(-ENOMEM);
 
-	kref_init(&device->kref);
+	refcount_set(&device->refcount, 1);
+	init_completion(&device->comp);
 	device->dev = dev;
 	device->group = group;
 	device->ops = ops;
 	device->device_data = device_data;
 	dev_set_drvdata(dev, device);
 
-	/* No need to get group_lock, caller has group reference */
+	/*
+	 * No need to get group_lock, caller has group reference, matching put
+	 * is in vfio_del_group_dev()
+	 */
 	vfio_group_get(group);
 
 	mutex_lock(&group->device_lock);
@@ -562,37 +566,17 @@ struct vfio_device *vfio_group_create_device(struct vfio_group *group,
 	return device;
 }
 
-static void vfio_device_release(struct kref *kref)
-{
-	struct vfio_device *device = container_of(kref,
-						  struct vfio_device, kref);
-	struct vfio_group *group = device->group;
-
-	list_del(&device->group_next);
-	group->dev_counter--;
-	mutex_unlock(&group->device_lock);
-
-	dev_set_drvdata(device->dev, NULL);
-
-	kfree(device);
-
-	/* vfio_del_group_dev may be waiting for this device */
-	wake_up(&vfio.release_q);
-}
-
 /* Device reference always implies a group reference */
 void vfio_device_put(struct vfio_device *device)
 {
-	struct vfio_group *group = device->group;
-	kref_put_mutex(&device->kref, vfio_device_release, &group->device_lock);
-	vfio_group_put(group);
+	if (refcount_dec_and_test(&device->refcount))
+		complete(&device->comp);
 }
 EXPORT_SYMBOL_GPL(vfio_device_put);
 
 static void vfio_device_get(struct vfio_device *device)
 {
-	vfio_group_get(device->group);
-	kref_get(&device->kref);
+	refcount_inc(&device->refcount);
 }
 
 static struct vfio_device *vfio_group_get_device(struct vfio_group *group,
@@ -920,19 +904,13 @@ EXPORT_SYMBOL_GPL(vfio_device_data);
  * removed.  Open file descriptors for the device... */
 void *vfio_del_group_dev(struct device *dev)
 {
-	DEFINE_WAIT_FUNC(wait, woken_wake_function);
 	struct vfio_device *device = dev_get_drvdata(dev);
 	struct vfio_group *group = device->group;
 	void *device_data = device->device_data;
 	struct vfio_unbound_dev *unbound;
 	unsigned int i = 0;
 	bool interrupted = false;
-
-	/*
-	 * The group exists so long as we have a device reference.  Get
-	 * a group reference and use it to scan for the device going away.
-	 */
-	vfio_group_get(group);
+	long rc;
 
 	/*
 	 * When the device is removed from the group, the group suddenly
@@ -952,33 +930,24 @@ void *vfio_del_group_dev(struct device *dev)
 	}
 	WARN_ON(!unbound);
 
+	mutex_lock(&group->device_lock);
+	list_del(&device->group_next);
+	group->dev_counter--;
+	mutex_unlock(&group->device_lock);
+
 	vfio_device_put(device);
-
-	/*
-	 * If the device is still present in the group after the above
-	 * 'put', then it is in use and we need to request it from the
-	 * bus driver.  The driver may in turn need to request the
-	 * device from the user.  We send the request on an arbitrary
-	 * interval with counter to allow the driver to take escalating
-	 * measures to release the device if it has the ability to do so.
-	 */
-	add_wait_queue(&vfio.release_q, &wait);
-
-	do {
-		device = vfio_group_get_device(group, dev);
-		if (!device)
-			break;
-
+	rc = try_wait_for_completion(&device->comp);
+	while (rc <= 0) {
 		if (device->ops->request)
 			device->ops->request(device_data, i++);
 
-		vfio_device_put(device);
-
 		if (interrupted) {
-			wait_woken(&wait, TASK_UNINTERRUPTIBLE, HZ * 10);
+			rc = wait_for_completion_timeout(&device->comp,
+							 HZ * 10);
 		} else {
-			wait_woken(&wait, TASK_INTERRUPTIBLE, HZ * 10);
-			if (signal_pending(current)) {
+			rc = wait_for_completion_interruptible_timeout(
+				&device->comp, HZ * 10);
+			if (rc < 0) {
 				interrupted = true;
 				dev_warn(dev,
 					 "Device is currently in use, task"
@@ -987,10 +956,8 @@ void *vfio_del_group_dev(struct device *dev)
 					 current->comm, task_pid_nr(current));
 			}
 		}
+	}
 
-	} while (1);
-
-	remove_wait_queue(&vfio.release_q, &wait);
 	/*
 	 * In order to support multiple devices per group, devices can be
 	 * plucked from the group while other devices in the group are still
@@ -1008,7 +975,10 @@ void *vfio_del_group_dev(struct device *dev)
 	if (list_empty(&group->device_list))
 		wait_event(group->container_q, !group->container);
 
+	/* Matches the get in vfio_group_create_device() */
 	vfio_group_put(group);
+	dev_set_drvdata(dev, NULL);
+	kfree(device);
 
 	return device_data;
 }
@@ -2379,7 +2349,6 @@ static int __init vfio_init(void)
 	mutex_init(&vfio.iommu_drivers_lock);
 	INIT_LIST_HEAD(&vfio.group_list);
 	INIT_LIST_HEAD(&vfio.iommu_drivers_list);
-	init_waitqueue_head(&vfio.release_q);
 
 	ret = misc_register(&vfio_dev);
 	if (ret) {
