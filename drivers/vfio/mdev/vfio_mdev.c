@@ -129,9 +129,8 @@ static const struct vfio_device_ops vfio_mdev_dev_ops = {
 	.request	= vfio_mdev_request,
 };
 
-static int vfio_mdev_probe(struct device *dev)
+static int vfio_mdev_probe(struct mdev_device *mdev)
 {
-	struct mdev_device *mdev = to_mdev_device(dev);
 	struct mdev_vfio_device *mvdev;
 	int ret;
 
@@ -149,9 +148,9 @@ static int vfio_mdev_probe(struct device *dev)
 	return 0;
 }
 
-static void vfio_mdev_remove(struct device *dev)
+static void vfio_mdev_remove(struct mdev_device *mdev)
 {
-	struct mdev_vfio_device *mvdev = dev_get_drvdata(dev);
+	struct mdev_vfio_device *mvdev = dev_get_drvdata(&mdev->dev);
 
 	vfio_unregister_group_dev(&mvdev->vdev);
 	kfree(mvdev);
