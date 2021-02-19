@@ -139,7 +139,7 @@ static int vfio_mdev_probe(struct device *dev)
 	if (!mvdev)
 		return -ENOMEM;
 
-	vfio_init_group_dev(&mvdev->vdev, &mdev->dev, &vfio_mdev_dev_ops, mdev);
+	vfio_init_group_dev(&mvdev->vdev, &mdev->dev, &vfio_mdev_dev_ops);
 	ret = vfio_register_group_dev(&mvdev->vdev);
 	if (ret) {
 		kfree(mvdev);
