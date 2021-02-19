@@ -93,7 +93,7 @@ static int vfio_platform_bcmflexrm_reset(struct vfio_platform_device *vdev)
 		if (readl_relaxed(ring + RING_VER) == RING_VER_MAGIC) {
 			rc = vfio_platform_bcmflexrm_shutdown(ring);
 			if (rc) {
-				dev_warn(vdev->device,
+				dev_warn(vdev->vdev.dev,
 					 "FlexRM ring%d shutdown error %d\n",
 					 ring_num, rc);
 				ret |= rc;

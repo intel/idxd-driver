@@ -73,7 +73,7 @@ static int vfio_platform_acpi_call_reset(struct vfio_platform_device *vdev,
 {
 #ifdef CONFIG_ACPI
 	struct acpi_buffer buffer = { ACPI_ALLOCATE_BUFFER, NULL };
-	struct device *dev = vdev->device;
+	struct device *dev = vdev->vdev.dev;
 	acpi_handle handle = ACPI_HANDLE(dev);
 	acpi_status acpi_ret;
 
@@ -93,7 +93,7 @@ static int vfio_platform_acpi_call_reset(struct vfio_platform_device *vdev,
 static bool vfio_platform_acpi_has_reset(struct vfio_platform_device *vdev)
 {
 #ifdef CONFIG_ACPI
-	struct device *dev = vdev->device;
+	struct device *dev = vdev->vdev.dev;
 	acpi_handle handle = ACPI_HANDLE(dev);
 
 	return acpi_has_method(handle, "_RST");
@@ -207,14 +207,14 @@ static int vfio_platform_call_reset(struct vfio_platform_device *vdev,
 				    const char **extra_dbg)
 {
 	if (VFIO_PLATFORM_IS_ACPI(vdev)) {
-		dev_info(vdev->device, "reset\n");
+		dev_info(vdev->vdev.dev, "reset\n");
 		return vfio_platform_acpi_call_reset(vdev, extra_dbg);
 	} else if (vdev->of_reset) {
-		dev_info(vdev->device, "reset\n");
+		dev_info(vdev->vdev.dev, "reset\n");
 		return vdev->of_reset(vdev);
 	}
 
-	dev_warn(vdev->device, "no reset function found!\n");
+	dev_warn(vdev->vdev.dev, "no reset function found!\n");
 	return -EINVAL;
 }
 
@@ -231,11 +231,11 @@ static void vfio_platform_release(struct vfio_device *core_vdev)
 
 		ret = vfio_platform_call_reset(vdev, &extra_dbg);
 		if (ret && vdev->reset_required) {
-			dev_warn(vdev->device, "reset driver is required and reset call failed in release (%d) %s\n",
+			dev_warn(vdev->vdev.dev, "reset driver is required and reset call failed in release (%d) %s\n",
 				 ret, extra_dbg ? extra_dbg : "");
 			WARN_ON(1);
 		}
-		pm_runtime_put(vdev->device);
+		pm_runtime_put(vdev->vdev.dev);
 		vfio_platform_regions_cleanup(vdev);
 		vfio_platform_irq_cleanup(vdev);
 	}
@@ -267,13 +267,13 @@ static int vfio_platform_open(struct vfio_device *core_vdev)
 		if (ret)
 			goto err_irq;
 
-		ret = pm_runtime_get_sync(vdev->device);
+		ret = pm_runtime_get_sync(vdev->vdev.dev);
 		if (ret < 0)
 			goto err_rst;
 
 		ret = vfio_platform_call_reset(vdev, &extra_dbg);
 		if (ret && vdev->reset_required) {
-			dev_warn(vdev->device, "reset driver is required and reset call failed in open (%d) %s\n",
+			dev_warn(vdev->vdev.dev, "reset driver is required and reset call failed in open (%d) %s\n",
 				 ret, extra_dbg ? extra_dbg : "");
 			goto err_rst;
 		}
@@ -285,7 +285,7 @@ static int vfio_platform_open(struct vfio_device *core_vdev)
 	return 0;
 
 err_rst:
-	pm_runtime_put(vdev->device);
+	pm_runtime_put(vdev->vdev.dev);
 	vfio_platform_irq_cleanup(vdev);
 err_irq:
 	vfio_platform_regions_cleanup(vdev);
@@ -675,8 +675,6 @@ int vfio_platform_probe_common(struct vfio_platform_device *vdev,
 	if (ret)
 		return ret;
 
-	vdev->device = dev;
-
 	ret = vfio_platform_get_reset(vdev);
 	if (ret && vdev->reset_required) {
 		dev_err(dev, "No reset function found for device %s\n",
@@ -712,7 +710,7 @@ void vfio_platform_remove_common(struct vfio_platform_device *vdev)
 {
 	vfio_unregister_group_dev(&vdev->vdev);
 
-	pm_runtime_disable(vdev->device);
+	pm_runtime_disable(vdev->vdev.dev);
 	vfio_platform_put_reset(vdev);
 	vfio_iommu_group_put(vdev->vdev.dev->iommu_group, vdev->vdev.dev);
 }

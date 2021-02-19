@@ -54,7 +54,6 @@ struct vfio_platform_device {
 	const char			*compat;
 	const char			*acpihid;
 	struct module			*reset_module;
-	struct device			*device;
 
 	/*
 	 * These fields should be filled by the bus specific binder
