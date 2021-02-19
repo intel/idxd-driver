@@ -64,6 +64,12 @@ void vfio_init_group_dev(struct vfio_device *device, struct device *dev,
 int vfio_register_group_dev(struct vfio_device *device);
 void vfio_unregister_group_dev(struct vfio_device *device);
 extern struct vfio_device *vfio_device_get_from_dev(struct device *dev);
+
+static inline void vfio_device_get(struct vfio_device *device)
+{
+	refcount_inc(&device->refcount);
+}
+
 extern void vfio_device_put(struct vfio_device *device);
 
 /* events for the backend driver notify callback */

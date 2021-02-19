@@ -517,30 +517,46 @@ out:
 
 static struct pci_driver vfio_pci_driver;
 
-static struct vfio_pci_device *get_pf_vdev(struct vfio_pci_device *vdev,
-					   struct vfio_device **pf_dev)
+static struct vfio_pci_device *vfio_pci_get_drvdata(struct pci_dev *pdev)
 {
-	struct pci_dev *physfn = pci_physfn(vdev->pdev);
+	struct vfio_pci_device *vdev = dev_get_drvdata(&pdev->dev);
 
-	if (!vdev->pdev->is_virtfn)
+	/* The returned pointer is valid while the device_lock is held */
+	device_lock_assert(&pdev->dev);
+
+	if (pci_dev_driver(pdev) != &vfio_pci_driver || !vdev)
+	    return NULL;
+
+	/*
+	 * Guarenteed to still have a get on vdev->vdev because the device_lock
+	 * prevents remove from running, and the pci_dev_driver() test ensures
+	 * remove hasn't run yet.
+	 */
+	return vdev;
+}
+
+static struct vfio_pci_device *get_pf_vdev(struct vfio_pci_device *vf_vdev)
+{
+	struct pci_dev *physfn = pci_physfn(vf_vdev->pdev);
+	struct vfio_pci_device *vdev;
+
+	if (!vf_vdev->pdev->is_virtfn)
 		return NULL;
 
-	*pf_dev = vfio_device_get_from_dev(&physfn->dev);
-	if (!*pf_dev)
-		return NULL;
-
-	if (pci_dev_driver(physfn) != &vfio_pci_driver) {
-		vfio_device_put(*pf_dev);
+	device_lock(&physfn->dev);
+	vdev = vfio_pci_get_drvdata(physfn);
+	if (!vdev) {
+		device_unlock(&physfn->dev);
 		return NULL;
 	}
-
-	return container_of(*pf_dev, struct vfio_pci_device, vdev);
+	vfio_device_get(&vdev->vdev);
+	device_unlock(&physfn->dev);
+	return vdev;
 }
 
 static void vfio_pci_vf_token_user_add(struct vfio_pci_device *vdev, int val)
 {
-	struct vfio_device *pf_dev;
-	struct vfio_pci_device *pf_vdev = get_pf_vdev(vdev, &pf_dev);
+	struct vfio_pci_device *pf_vdev = get_pf_vdev(vdev);
 
 	if (!pf_vdev)
 		return;
@@ -550,7 +566,7 @@ static void vfio_pci_vf_token_user_add(struct vfio_pci_device *vdev, int val)
 	WARN_ON(pf_vdev->vf_token->users < 0);
 	mutex_unlock(&pf_vdev->vf_token->lock);
 
-	vfio_device_put(pf_dev);
+	vfio_device_put(&pf_vdev->vdev);
 }
 
 static void vfio_pci_release(struct vfio_device *core_vdev)
@@ -1771,8 +1787,7 @@ static int vfio_pci_validate_vf_token(struct vfio_pci_device *vdev,
 		return 0; /* No VF token provided or required */
 
 	if (vdev->pdev->is_virtfn) {
-		struct vfio_device *pf_dev;
-		struct vfio_pci_device *pf_vdev = get_pf_vdev(vdev, &pf_dev);
+		struct vfio_pci_device *pf_vdev = get_pf_vdev(vdev);
 		bool match;
 
 		if (!pf_vdev) {
@@ -1785,7 +1800,7 @@ static int vfio_pci_validate_vf_token(struct vfio_pci_device *vdev,
 		}
 
 		if (!vf_token) {
-			vfio_device_put(pf_dev);
+			vfio_device_put(&pf_vdev->vdev);
 			pci_info_ratelimited(vdev->pdev,
 				"VF token required to access device\n");
 			return -EACCES;
@@ -1795,7 +1810,7 @@ static int vfio_pci_validate_vf_token(struct vfio_pci_device *vdev,
 		match = uuid_equal(uuid, &pf_vdev->vf_token->uuid);
 		mutex_unlock(&pf_vdev->vf_token->lock);
 
-		vfio_device_put(pf_dev);
+		vfio_device_put(&pf_vdev->vdev);
 
 		if (!match) {
 			pci_info_ratelimited(vdev->pdev,
@@ -2206,63 +2221,58 @@ static void vfio_pci_reflck_put(struct vfio_pci_reflck *reflck)
 static int vfio_pci_get_unused_devs(struct pci_dev *pdev, void *data)
 {
 	struct vfio_devices *devs = data;
-	struct vfio_device *device;
 	struct vfio_pci_device *vdev;
 
 	if (devs->cur_index == devs->max_index)
 		return -ENOSPC;
 
-	device = vfio_device_get_from_dev(&pdev->dev);
-	if (!device)
+	device_lock(&pdev->dev);
+	vdev = vfio_pci_get_drvdata(pdev);
+	if (!vdev) {
+		device_unlock(&pdev->dev);
 		return -EINVAL;
-
-	if (pci_dev_driver(pdev) != &vfio_pci_driver) {
-		vfio_device_put(device);
-		return -EBUSY;
 	}
-
-	vdev = container_of(device, struct vfio_pci_device, vdev);
 
 	/* Fault if the device is not unused */
 	if (vdev->refcnt) {
-		vfio_device_put(device);
+		device_unlock(&pdev->dev);
 		return -EBUSY;
 	}
-
+	vfio_device_get(&vdev->vdev);
 	devs->devices[devs->cur_index++] = vdev;
+	device_unlock(&pdev->dev);
+
 	return 0;
 }
 
 static int vfio_pci_try_zap_and_vma_lock_cb(struct pci_dev *pdev, void *data)
 {
 	struct vfio_devices *devs = data;
-	struct vfio_device *device;
 	struct vfio_pci_device *vdev;
 
 	if (devs->cur_index == devs->max_index)
 		return -ENOSPC;
 
-	device = vfio_device_get_from_dev(&pdev->dev);
-	if (!device)
+	device_lock(&pdev->dev);
+	vdev = vfio_pci_get_drvdata(pdev);
+	if (!vdev) {
+		device_unlock(&pdev->dev);
 		return -EINVAL;
-
-	if (pci_dev_driver(pdev) != &vfio_pci_driver) {
-		vfio_device_put(device);
-		return -EBUSY;
 	}
-
-	vdev = container_of(device, struct vfio_pci_device, vdev);
 
 	/*
 	 * Locking multiple devices is prone to deadlock, runaway and
 	 * unwind if we hit contention.
 	 */
 	if (!vfio_pci_zap_and_vma_lock(vdev, true)) {
-		vfio_device_put(device);
+		device_unlock(&pdev->dev);
 		return -EBUSY;
 	}
 
+	vfio_device_get(&vdev->vdev);
 	devs->devices[devs->cur_index++] = vdev;
+	device_unlock(&pdev->dev);
+
 	return 0;
 }
 

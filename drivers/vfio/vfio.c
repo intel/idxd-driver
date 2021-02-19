@@ -530,11 +530,6 @@ void vfio_device_put(struct vfio_device *device)
 }
 EXPORT_SYMBOL_GPL(vfio_device_put);
 
-static void vfio_device_get(struct vfio_device *device)
-{
-	refcount_inc(&device->refcount);
-}
-
 static struct vfio_device *vfio_group_get_device(struct vfio_group *group,
 						 struct device *dev)
 {
