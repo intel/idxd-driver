@@ -581,4 +581,52 @@ struct msi_domain_info *msi_get_domain_info(struct irq_domain *domain)
 	return (struct msi_domain_info *)domain->host_data;
 }
 
+/**
+ * get_dev_msi_entry - Get the nth device MSI entry
+ * @dev: device to operate on
+ * @nr: device-relative interrupt vector index (0-based).
+ *
+ * Return the nth dev_msi entry
+ */
+static struct msi_desc *get_dev_msi_entry(struct device *dev, unsigned int nr)
+{
+	struct msi_desc *entry;
+	int i = 0;
+
+	for_each_msi_entry(entry, dev) {
+		if (i == nr)
+			return entry;
+		i++;
+	}
+
+	WARN_ON_ONCE(!entry);
+	return entry;
+}
+
+/**
+ * dev_msi_irq_vector - Get the Linux IRQ number of a device vector
+ * @dev: device to operate on
+ * @nr: device-relative interrupt vector index (0-based).
+ *
+ * Returns the Linux IRQ number of a device vector.
+ */
+int dev_msi_irq_vector(struct device *dev, unsigned int nr)
+{
+	return get_dev_msi_entry(dev, nr)->irq;
+}
+EXPORT_SYMBOL_GPL(dev_msi_irq_vector);
+
+/**
+ * dev_msi_hwirq - Get the device MSI hw IRQ number of a device vector
+ * @dev: device to operate on
+ * @nr: device-relative interrupt vector index (0-based).
+ *
+ * Return the dev_msi hw IRQ number of a device vector.
+ */
+int dev_msi_hwirq(struct device *dev, unsigned int nr)
+{
+	return get_dev_msi_entry(dev, nr)->device_msi.hwirq;
+}
+EXPORT_SYMBOL_GPL(dev_msi_hwirq);
+
 #endif /* CONFIG_GENERIC_MSI_IRQ_DOMAIN */
