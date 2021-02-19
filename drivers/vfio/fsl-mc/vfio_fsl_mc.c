@@ -600,20 +600,28 @@ static int vfio_fsl_mc_probe(struct fsl_mc_device *mc_dev)
 		return -EINVAL;
 	}
 
-	vdev = devm_kzalloc(dev, sizeof(*vdev), GFP_KERNEL);
+	vdev = kzalloc(sizeof(*vdev), GFP_KERNEL);
 	if (!vdev) {
 		ret = -ENOMEM;
 		goto out_group_put;
 	}
 
+	vfio_init_group_dev(&vdev->vdev, dev, &vfio_fsl_mc_ops, vdev);
+	mutex_init(&vdev->igate);
 	vdev->mc_dev = mc_dev;
 
-	ret = vfio_add_group_dev(dev, &vfio_fsl_mc_ops, vdev);
+	ret = vfio_register_group_dev(&vdev->vdev);
 	if (ret) {
 		dev_err(dev, "VFIO_FSL_MC: Failed to add to vfio group\n");
-		goto out_group_put;
+		goto out_kfree;
 	}
+	dev_set_drvdata(dev, vdev);
 
+	/*
+	 * FIXME: vfio_register_group_dev() allows VFIO_GROUP_GET_DEVICE_FD to
+	 * immediately return the device to userspace, but we haven't finished
+	 * setting it up yet.
+	 */
 	ret = vfio_fsl_mc_reflck_attach(vdev);
 	if (ret)
 		goto out_group_dev;
@@ -621,15 +629,14 @@ static int vfio_fsl_mc_probe(struct fsl_mc_device *mc_dev)
 	ret = vfio_fsl_mc_init_device(vdev);
 	if (ret)
 		goto out_reflck;
-
-	mutex_init(&vdev->igate);
-
 	return 0;
 
 out_reflck:
 	vfio_fsl_mc_reflck_put(vdev->reflck);
 out_group_dev:
-	vfio_del_group_dev(dev);
+	vfio_unregister_group_dev(&vdev->vdev);
+out_kfree:
+	kfree(vdev);
 out_group_put:
 	vfio_iommu_group_put(group, dev);
 	return ret;
@@ -637,13 +644,10 @@ out_group_put:
 
 static int vfio_fsl_mc_remove(struct fsl_mc_device *mc_dev)
 {
-	struct vfio_fsl_mc_device *vdev;
 	struct device *dev = &mc_dev->dev;
+	struct vfio_fsl_mc_device *vdev = dev_get_drvdata(dev);
 
-	vdev = vfio_del_group_dev(dev);
-	if (!vdev)
-		return -EINVAL;
-
+	vfio_unregister_group_dev(&vdev->vdev);
 	mutex_destroy(&vdev->igate);
 
 	vfio_fsl_mc_reflck_put(vdev->reflck);
@@ -656,8 +660,8 @@ static int vfio_fsl_mc_remove(struct fsl_mc_device *mc_dev)
 	if (vdev->nb.notifier_call)
 		bus_unregister_notifier(&fsl_mc_bus_type, &vdev->nb);
 
+	kfree(vdev);
 	vfio_iommu_group_put(mc_dev->dev.iommu_group, dev);
-
 	return 0;
 }
 
