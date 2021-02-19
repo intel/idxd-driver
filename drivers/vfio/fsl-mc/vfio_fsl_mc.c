@@ -19,8 +19,6 @@
 
 static struct fsl_mc_driver vfio_fsl_mc_driver;
 
-static DEFINE_MUTEX(reflck_lock);
-
 static void vfio_fsl_mc_reflck_get(struct vfio_fsl_mc_reflck *reflck)
 {
 	kref_get(&reflck->kref);
@@ -34,12 +32,11 @@ static void vfio_fsl_mc_reflck_release(struct kref *kref)
 
 	mutex_destroy(&reflck->lock);
 	kfree(reflck);
-	mutex_unlock(&reflck_lock);
 }
 
 static void vfio_fsl_mc_reflck_put(struct vfio_fsl_mc_reflck *reflck)
 {
-	kref_put_mutex(&reflck->kref, vfio_fsl_mc_reflck_release, &reflck_lock);
+	kref_put(&reflck->kref, vfio_fsl_mc_reflck_release);
 }
 
 static struct vfio_fsl_mc_reflck *vfio_fsl_mc_reflck_alloc(void)
@@ -58,38 +55,31 @@ static struct vfio_fsl_mc_reflck *vfio_fsl_mc_reflck_alloc(void)
 
 static int vfio_fsl_mc_reflck_attach(struct vfio_fsl_mc_device *vdev)
 {
-	int ret = 0;
+	struct fsl_mc_device *mc_dev = to_fsl_mc_device(vdev->vdev.dev);
+	struct device *mc_cont_dev = mc_dev->dev.parent;
+	struct vfio_fsl_mc_device *cont_vdev;
 
-	mutex_lock(&reflck_lock);
-	if (is_fsl_mc_bus_dprc(vdev->mc_dev)) {
+	if (is_fsl_mc_bus_dprc(mc_dev)) {
 		vdev->reflck = vfio_fsl_mc_reflck_alloc();
-		ret = PTR_ERR_OR_ZERO(vdev->reflck);
-	} else {
-		struct device *mc_cont_dev = vdev->mc_dev->dev.parent;
-		struct vfio_device *device;
-		struct vfio_fsl_mc_device *cont_vdev;
-
-		device = vfio_device_get_from_dev(mc_cont_dev);
-		if (!device) {
-			ret = -ENODEV;
-			goto unlock;
-		}
-
-		cont_vdev =
-			container_of(device, struct vfio_fsl_mc_device, vdev);
-		if (!cont_vdev || !cont_vdev->reflck) {
-			vfio_device_put(device);
-			ret = -ENODEV;
-			goto unlock;
-		}
-		vfio_fsl_mc_reflck_get(cont_vdev->reflck);
-		vdev->reflck = cont_vdev->reflck;
-		vfio_device_put(device);
+		return PTR_ERR_OR_ZERO(vdev->reflck);
 	}
 
-unlock:
-	mutex_unlock(&reflck_lock);
-	return ret;
+	device_lock(mc_cont_dev);
+	cont_vdev = dev_get_drvdata(mc_cont_dev);
+	if (mc_cont_dev->driver != &vfio_fsl_mc_driver.driver || !cont_vdev ||
+	    !cont_vdev->reflck) {
+		device_unlock(mc_cont_dev);
+		return -ENODEV;
+	}
+
+	/*
+	 * Since we hold device_lock this cannot race with
+	 * vfio_fsl_mc_remove() for cont_vdev
+	 */
+	vfio_fsl_mc_reflck_get(cont_vdev->reflck);
+	vdev->reflck = cont_vdev->reflck;
+	device_unlock(mc_cont_dev);
+	return 0;
 }
 
 static int vfio_fsl_mc_regions_init(struct vfio_fsl_mc_device *vdev)
