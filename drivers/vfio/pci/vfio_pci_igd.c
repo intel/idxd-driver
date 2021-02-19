@@ -54,12 +54,13 @@ static const struct vfio_pci_regops vfio_pci_igd_regops = {
 
 static int vfio_pci_igd_opregion_init(struct vfio_pci_device *vdev)
 {
+	struct pci_dev *pdev = to_pci_dev(vdev->vdev.dev);
 	__le32 *dwordp = (__le32 *)(vdev->vconfig + OPREGION_PCI_ADDR);
 	u32 addr, size;
 	void *base;
 	int ret;
 
-	ret = pci_read_config_dword(vdev->pdev, OPREGION_PCI_ADDR, &addr);
+	ret = pci_read_config_dword(pdev, OPREGION_PCI_ADDR, &addr);
 	if (ret)
 		return ret;
 

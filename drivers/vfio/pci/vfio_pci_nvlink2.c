@@ -141,6 +141,7 @@ static int vfio_pci_nvgpu_mmap(struct vfio_pci_device *vdev,
 {
 	int ret;
 	struct vfio_pci_nvgpu_data *data = region->data;
+	struct pci_dev *npdev = to_pci_dev(vdev->vdev.dev);
 
 	if (data->useraddr)
 		return -EPERM;
@@ -165,7 +166,7 @@ static int vfio_pci_nvgpu_mmap(struct vfio_pci_device *vdev,
 	ret = (int) mm_iommu_newdev(data->mm, data->useraddr,
 			vma_pages(vma), data->gpu_hpa, &data->mem);
 
-	trace_vfio_pci_nvgpu_mmap(vdev->pdev, data->gpu_hpa, data->useraddr,
+	trace_vfio_pci_nvgpu_mmap(npdev, data->gpu_hpa, data->useraddr,
 			vma->vm_end - vma->vm_start, ret);
 
 	return ret;
@@ -217,12 +218,13 @@ int vfio_pci_nvdia_v100_nvlink2_init(struct vfio_pci_device *vdev)
 	struct vfio_pci_nvgpu_data *data;
 	uint32_t mem_phandle = 0;
 	unsigned long events = VFIO_GROUP_NOTIFY_SET_KVM;
+	struct pci_dev *npdev = to_pci_dev(vdev->vdev.dev);
 
 	/*
 	 * PCI config space does not tell us about NVLink presense but
 	 * platform does, use this.
 	 */
-	npu_dev = pnv_pci_get_npu_dev(vdev->pdev, 0);
+	npu_dev = pnv_pci_get_npu_dev(npdev, 0);
 	if (!npu_dev)
 		return -ENODEV;
 
@@ -243,7 +245,7 @@ int vfio_pci_nvdia_v100_nvlink2_init(struct vfio_pci_device *vdev)
 		return -EINVAL;
 
 	if (of_property_read_u64(npu_node, "ibm,device-tgt-addr", &tgt)) {
-		dev_warn(&vdev->pdev->dev, "No ibm,device-tgt-addr found\n");
+		dev_warn(&npdev->dev, "No ibm,device-tgt-addr found\n");
 		return -EFAULT;
 	}
 
@@ -255,10 +257,10 @@ int vfio_pci_nvdia_v100_nvlink2_init(struct vfio_pci_device *vdev)
 	data->gpu_tgt = tgt;
 	data->size = reg[1];
 
-	dev_dbg(&vdev->pdev->dev, "%lx..%lx\n", data->gpu_hpa,
+	dev_dbg(&npdev->dev, "%lx..%lx\n", data->gpu_hpa,
 			data->gpu_hpa + data->size - 1);
 
-	data->gpdev = vdev->pdev;
+	data->gpdev = npdev;
 	data->group_notifier.notifier_call = vfio_pci_nvgpu_group_notifier;
 
 	ret = vfio_register_notifier(&data->gpdev->dev, VFIO_GROUP_NOTIFY,
@@ -334,6 +336,7 @@ static int vfio_pci_npu2_mmap(struct vfio_pci_device *vdev,
 	int ret;
 	struct vfio_pci_npu2_data *data = region->data;
 	unsigned long req_len = vma->vm_end - vma->vm_start;
+	struct pci_dev *npdev = to_pci_dev(vdev->vdev.dev);
 
 	if (req_len != PAGE_SIZE)
 		return -EINVAL;
@@ -343,7 +346,7 @@ static int vfio_pci_npu2_mmap(struct vfio_pci_device *vdev,
 
 	ret = remap_pfn_range(vma, vma->vm_start, data->mmio_atsd >> PAGE_SHIFT,
 			req_len, vma->vm_page_prot);
-	trace_vfio_pci_npu2_mmap(vdev->pdev, data->mmio_atsd, vma->vm_start,
+	trace_vfio_pci_npu2_mmap(npdev, data->mmio_atsd, vma->vm_start,
 			vma->vm_end - vma->vm_start, ret);
 
 	return ret;
@@ -394,7 +397,7 @@ int vfio_pci_ibm_npu2_init(struct vfio_pci_device *vdev)
 	struct vfio_pci_npu2_data *data;
 	struct device_node *nvlink_dn;
 	u32 nvlink_index = 0, mem_phandle = 0;
-	struct pci_dev *npdev = vdev->pdev;
+	struct pci_dev *npdev = to_pci_dev(vdev->vdev.dev);
 	struct device_node *npu_node = pci_device_to_OF_node(npdev);
 	struct pci_controller *hose = pci_bus_to_host(npdev->bus);
 	u64 mmio_atsd = 0;
@@ -405,7 +408,7 @@ int vfio_pci_ibm_npu2_init(struct vfio_pci_device *vdev)
 	 * PCI config space does not tell us about NVLink presense but
 	 * platform does, use this.
 	 */
-	if (!pnv_pci_get_gpu_dev(vdev->pdev))
+	if (!pnv_pci_get_gpu_dev(npdev))
 		return -ENODEV;
 
 	if (of_property_read_u32(npu_node, "memory-region", &mem_phandle))
@@ -427,21 +430,21 @@ int vfio_pci_ibm_npu2_init(struct vfio_pci_device *vdev)
 			&mmio_atsd)) {
 		if (of_property_read_u64_index(hose->dn, "ibm,mmio-atsd", 0,
 				&mmio_atsd)) {
-			dev_warn(&vdev->pdev->dev, "No available ATSD found\n");
+			dev_warn(&npdev->dev, "No available ATSD found\n");
 			mmio_atsd = 0;
 		} else {
-			dev_warn(&vdev->pdev->dev,
+			dev_warn(&npdev->dev,
 				 "Using fallback ibm,mmio-atsd[0] for ATSD.\n");
 		}
 	}
 
 	if (of_property_read_u64(npu_node, "ibm,device-tgt-addr", &tgt)) {
-		dev_warn(&vdev->pdev->dev, "No ibm,device-tgt-addr found\n");
+		dev_warn(&npdev->dev, "No ibm,device-tgt-addr found\n");
 		return -EFAULT;
 	}
 
 	if (of_property_read_u32(npu_node, "ibm,nvlink-speed", &link_speed)) {
-		dev_warn(&vdev->pdev->dev, "No ibm,nvlink-speed found\n");
+		dev_warn(&npdev->dev, "No ibm,nvlink-speed found\n");
 		return -EFAULT;
 	}
 
