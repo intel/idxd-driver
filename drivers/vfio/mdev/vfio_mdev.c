@@ -21,6 +21,11 @@
 #define DRIVER_AUTHOR   "NVIDIA Corporation"
 #define DRIVER_DESC     "VFIO based driver for Mediated device"
 
+struct mdev_vfio_device
+{
+	struct vfio_device vdev;
+};
+
 static int vfio_mdev_open(void *device_data)
 {
 	struct mdev_device *mdev = device_data;
@@ -124,13 +129,29 @@ static const struct vfio_device_ops vfio_mdev_dev_ops = {
 static int vfio_mdev_probe(struct device *dev)
 {
 	struct mdev_device *mdev = to_mdev_device(dev);
+	struct mdev_vfio_device *mvdev;
+	int ret;
 
-	return vfio_add_group_dev(dev, &vfio_mdev_dev_ops, mdev);
+	mvdev = kzalloc(sizeof(*mvdev), GFP_KERNEL);
+	if (!mvdev)
+		return -ENOMEM;
+
+	vfio_init_group_dev(&mvdev->vdev, &mdev->dev, &vfio_mdev_dev_ops, mdev);
+	ret = vfio_register_group_dev(&mvdev->vdev);
+	if (ret) {
+		kfree(mvdev);
+		return ret;
+	}
+	dev_set_drvdata(&mdev->dev, mvdev);
+	return 0;
 }
 
 static void vfio_mdev_remove(struct device *dev)
 {
-	vfio_del_group_dev(dev);
+	struct mdev_vfio_device *mvdev = dev_get_drvdata(dev);
+
+	vfio_unregister_group_dev(&mvdev->vdev);
+	kfree(mvdev);
 }
 
 static struct mdev_driver vfio_mdev_driver = {
