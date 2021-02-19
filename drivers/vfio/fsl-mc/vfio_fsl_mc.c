@@ -84,7 +84,7 @@ static int vfio_fsl_mc_reflck_attach(struct vfio_fsl_mc_device *vdev)
 
 static int vfio_fsl_mc_regions_init(struct vfio_fsl_mc_device *vdev)
 {
-	struct fsl_mc_device *mc_dev = vdev->mc_dev;
+	struct fsl_mc_device *mc_dev = to_fsl_mc_device(vdev->vdev.dev);
 	int count = mc_dev->obj_desc.region_count;
 	int i;
 
@@ -118,7 +118,7 @@ static int vfio_fsl_mc_regions_init(struct vfio_fsl_mc_device *vdev)
 
 static void vfio_fsl_mc_regions_cleanup(struct vfio_fsl_mc_device *vdev)
 {
-	struct fsl_mc_device *mc_dev = vdev->mc_dev;
+	struct fsl_mc_device *mc_dev = to_fsl_mc_device(vdev->vdev.dev);
 	int i;
 
 	for (i = 0; i < mc_dev->obj_desc.region_count; i++)
@@ -162,7 +162,7 @@ static void vfio_fsl_mc_release(struct vfio_device *core_vdev)
 	mutex_lock(&vdev->reflck->lock);
 
 	if (!(--vdev->refcnt)) {
-		struct fsl_mc_device *mc_dev = vdev->mc_dev;
+		struct fsl_mc_device *mc_dev = to_fsl_mc_device(vdev->vdev.dev);
 		struct device *cont_dev = fsl_mc_cont_dev(&mc_dev->dev);
 		struct fsl_mc_device *mc_cont = to_fsl_mc_device(cont_dev);
 
@@ -196,7 +196,7 @@ static long vfio_fsl_mc_ioctl(struct vfio_device *core_vdev,
 	unsigned long minsz;
 	struct vfio_fsl_mc_device *vdev =
 		container_of(core_vdev, struct vfio_fsl_mc_device, vdev);
-	struct fsl_mc_device *mc_dev = vdev->mc_dev;
+	struct fsl_mc_device *mc_dev = to_fsl_mc_device(vdev->vdev.dev);
 
 	switch (cmd) {
 	case VFIO_DEVICE_GET_INFO:
@@ -303,7 +303,7 @@ static long vfio_fsl_mc_ioctl(struct vfio_device *core_vdev,
 	case VFIO_DEVICE_RESET:
 	{
 		int ret;
-		struct fsl_mc_device *mc_dev = vdev->mc_dev;
+		struct fsl_mc_device *mc_dev = to_fsl_mc_device(vdev->vdev.dev);
 
 		/* reset is supported only for the DPRC */
 		if (!is_fsl_mc_bus_dprc(mc_dev))
@@ -328,7 +328,7 @@ static ssize_t vfio_fsl_mc_read(struct vfio_device *core_vdev, char __user *buf,
 		container_of(core_vdev, struct vfio_fsl_mc_device, vdev);
 	unsigned int index = VFIO_FSL_MC_OFFSET_TO_INDEX(*ppos);
 	loff_t off = *ppos & VFIO_FSL_MC_OFFSET_MASK;
-	struct fsl_mc_device *mc_dev = vdev->mc_dev;
+	struct fsl_mc_device *mc_dev = to_fsl_mc_device(vdev->vdev.dev);
 	struct vfio_fsl_mc_region *region;
 	u64 data[8];
 	int i;
@@ -407,7 +407,7 @@ static ssize_t vfio_fsl_mc_write(struct vfio_device *core_vdev,
 		container_of(core_vdev, struct vfio_fsl_mc_device, vdev);
 	unsigned int index = VFIO_FSL_MC_OFFSET_TO_INDEX(*ppos);
 	loff_t off = *ppos & VFIO_FSL_MC_OFFSET_MASK;
-	struct fsl_mc_device *mc_dev = vdev->mc_dev;
+	struct fsl_mc_device *mc_dev = to_fsl_mc_device(vdev->vdev.dev);
 	struct vfio_fsl_mc_region *region;
 	u64 data[8];
 	int ret;
@@ -470,7 +470,7 @@ static int vfio_fsl_mc_mmap(struct vfio_device *core_vdev,
 {
 	struct vfio_fsl_mc_device *vdev =
 		container_of(core_vdev, struct vfio_fsl_mc_device, vdev);
-	struct fsl_mc_device *mc_dev = vdev->mc_dev;
+	struct fsl_mc_device *mc_dev = to_fsl_mc_device(vdev->vdev.dev);
 	unsigned int index;
 
 	index = vma->vm_pgoff >> (VFIO_FSL_MC_OFFSET_SHIFT - PAGE_SHIFT);
@@ -517,12 +517,12 @@ static int vfio_fsl_mc_bus_notifier(struct notifier_block *nb,
 {
 	struct vfio_fsl_mc_device *vdev = container_of(nb,
 					struct vfio_fsl_mc_device, nb);
+	struct fsl_mc_device *parent_mc_dev = to_fsl_mc_device(vdev->vdev.dev);
 	struct device *dev = data;
 	struct fsl_mc_device *mc_dev = to_fsl_mc_device(dev);
 	struct fsl_mc_device *mc_cont = to_fsl_mc_device(mc_dev->dev.parent);
 
-	if (action == BUS_NOTIFY_ADD_DEVICE &&
-	    vdev->mc_dev == mc_cont) {
+	if (action == BUS_NOTIFY_ADD_DEVICE && parent_mc_dev == mc_cont) {
 		mc_dev->driver_override = kasprintf(GFP_KERNEL, "%s",
 						    vfio_fsl_mc_ops.name);
 		if (!mc_dev->driver_override)
@@ -532,7 +532,7 @@ static int vfio_fsl_mc_bus_notifier(struct notifier_block *nb,
 			dev_info(dev, "VFIO_FSL_MC: Setting driver override for device in dprc %s\n",
 				 dev_name(&mc_cont->dev));
 	} else if (action == BUS_NOTIFY_BOUND_DRIVER &&
-		vdev->mc_dev == mc_cont) {
+		   parent_mc_dev == mc_cont) {
 		struct fsl_mc_driver *mc_drv = to_fsl_mc_driver(dev->driver);
 
 		if (mc_drv && mc_drv != &vfio_fsl_mc_driver)
@@ -545,7 +545,7 @@ static int vfio_fsl_mc_bus_notifier(struct notifier_block *nb,
 
 static int vfio_fsl_mc_init_device(struct vfio_fsl_mc_device *vdev)
 {
-	struct fsl_mc_device *mc_dev = vdev->mc_dev;
+	struct fsl_mc_device *mc_dev = to_fsl_mc_device(vdev->vdev.dev);
 	int ret;
 
 	/* Non-dprc devices share mc_io from parent */
@@ -607,14 +607,12 @@ static int vfio_fsl_mc_probe(struct fsl_mc_device *mc_dev)
 
 	vfio_init_group_dev(&vdev->vdev, dev, &vfio_fsl_mc_ops);
 	mutex_init(&vdev->igate);
-	vdev->mc_dev = mc_dev;
 
 	ret = vfio_register_group_dev(&vdev->vdev);
 	if (ret) {
 		dev_err(dev, "VFIO_FSL_MC: Failed to add to vfio group\n");
 		goto out_kfree;
 	}
-	dev_set_drvdata(dev, vdev);
 
 	/*
 	 * FIXME: vfio_register_group_dev() allows VFIO_GROUP_GET_DEVICE_FD to
@@ -628,6 +626,7 @@ static int vfio_fsl_mc_probe(struct fsl_mc_device *mc_dev)
 	ret = vfio_fsl_mc_init_device(vdev);
 	if (ret)
 		goto out_reflck;
+	dev_set_drvdata(dev, vdev);
 	return 0;
 
 out_reflck:
