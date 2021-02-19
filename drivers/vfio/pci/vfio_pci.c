@@ -1957,6 +1957,7 @@ static int vfio_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		goto out_group_put;
 	}
 
+	vfio_init_group_dev(&vdev->vdev, &pdev->dev, &vfio_pci_ops, vdev);
 	vdev->pdev = pdev;
 	vdev->irq_type = VFIO_PCI_NUM_IRQS;
 	mutex_init(&vdev->igate);
@@ -1968,7 +1969,12 @@ static int vfio_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	INIT_LIST_HEAD(&vdev->vma_list);
 	init_rwsem(&vdev->memory_lock);
 
-	ret = vfio_add_group_dev(&pdev->dev, &vfio_pci_ops, vdev);
+	/*
+	 * FIXME: vfio_register_group_dev() allows VFIO_GROUP_GET_DEVICE_FD to
+	 * immediately return the device to userspace, but we haven't finished
+	 * setting it up yet.
+	*/
+	ret = vfio_register_group_dev(&vdev->vdev);
 	if (ret)
 		goto out_free;
 
@@ -2014,6 +2020,7 @@ static int vfio_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		vfio_pci_set_power_state(vdev, PCI_D3hot);
 	}
 
+	dev_set_drvdata(&pdev->dev, vdev);
 	return ret;
 
 out_vf_token:
@@ -2021,7 +2028,7 @@ out_vf_token:
 out_reflck:
 	vfio_pci_reflck_put(vdev->reflck);
 out_del_group_dev:
-	vfio_del_group_dev(&pdev->dev);
+	vfio_unregister_group_dev(&vdev->vdev);
 out_free:
 	kfree(vdev);
 out_group_put:
@@ -2031,13 +2038,11 @@ out_group_put:
 
 static void vfio_pci_remove(struct pci_dev *pdev)
 {
-	struct vfio_pci_device *vdev;
+	struct vfio_pci_device *vdev = dev_get_drvdata(&pdev->dev);
 
 	pci_disable_sriov(pdev);
 
-	vdev = vfio_del_group_dev(&pdev->dev);
-	if (!vdev)
-		return;
+	vfio_unregister_group_dev(&vdev->vdev);
 
 	if (vdev->vf_token) {
 		WARN_ON(vdev->vf_token->users);
