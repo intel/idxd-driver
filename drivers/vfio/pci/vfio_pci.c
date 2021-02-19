@@ -534,7 +534,7 @@ static struct vfio_pci_device *get_pf_vdev(struct vfio_pci_device *vdev,
 		return NULL;
 	}
 
-	return vfio_device_data(*pf_dev);
+	return container_of(*pf_dev, struct vfio_pci_device, vdev);
 }
 
 static void vfio_pci_vf_token_user_add(struct vfio_pci_device *vdev, int val)
@@ -794,7 +794,7 @@ int vfio_pci_register_dev_region(struct vfio_pci_device *vdev,
 }
 
 struct vfio_devices {
-	struct vfio_device **devices;
+	struct vfio_pci_device **devices;
 	int cur_index;
 	int max_index;
 };
@@ -1283,9 +1283,7 @@ reset_info_exit:
 			goto hot_reset_release;
 
 		for (; mem_idx < devs.cur_index; mem_idx++) {
-			struct vfio_pci_device *tmp;
-
-			tmp = vfio_device_data(devs.devices[mem_idx]);
+			struct vfio_pci_device *tmp = devs.devices[mem_idx];
 
 			ret = down_write_trylock(&tmp->memory_lock);
 			if (!ret) {
@@ -1300,17 +1298,13 @@ reset_info_exit:
 
 hot_reset_release:
 		for (i = 0; i < devs.cur_index; i++) {
-			struct vfio_device *device;
-			struct vfio_pci_device *tmp;
-
-			device = devs.devices[i];
-			tmp = vfio_device_data(device);
+			struct vfio_pci_device *tmp = devs.devices[i];
 
 			if (i < mem_idx)
 				up_write(&tmp->memory_lock);
 			else
 				mutex_unlock(&tmp->vma_lock);
-			vfio_device_put(device);
+			vfio_device_put(&tmp->vdev);
 		}
 		kfree(devs.devices);
 
@@ -2094,11 +2088,7 @@ static pci_ers_result_t vfio_pci_aer_err_detected(struct pci_dev *pdev,
 	if (device == NULL)
 		return PCI_ERS_RESULT_DISCONNECT;
 
-	vdev = vfio_device_data(device);
-	if (vdev == NULL) {
-		vfio_device_put(device);
-		return PCI_ERS_RESULT_DISCONNECT;
-	}
+	vdev = container_of(device, struct vfio_pci_device, vdev);
 
 	mutex_lock(&vdev->igate);
 
@@ -2114,7 +2104,6 @@ static pci_ers_result_t vfio_pci_aer_err_detected(struct pci_dev *pdev,
 
 static int vfio_pci_sriov_configure(struct pci_dev *pdev, int nr_virtfn)
 {
-	struct vfio_pci_device *vdev;
 	struct vfio_device *device;
 	int ret = 0;
 
@@ -2126,12 +2115,6 @@ static int vfio_pci_sriov_configure(struct pci_dev *pdev, int nr_virtfn)
 	device = vfio_device_get_from_dev(&pdev->dev);
 	if (!device)
 		return -ENODEV;
-
-	vdev = vfio_device_data(device);
-	if (!vdev) {
-		vfio_device_put(device);
-		return -ENODEV;
-	}
 
 	if (nr_virtfn == 0)
 		pci_disable_sriov(pdev);
@@ -2192,7 +2175,7 @@ static int vfio_pci_reflck_find(struct pci_dev *pdev, void *data)
 		return 0;
 	}
 
-	vdev = vfio_device_data(device);
+	vdev = container_of(device, struct vfio_pci_device, vdev);
 
 	if (vdev->reflck) {
 		vfio_pci_reflck_get(vdev->reflck);
@@ -2254,7 +2237,7 @@ static int vfio_pci_get_unused_devs(struct pci_dev *pdev, void *data)
 		return -EBUSY;
 	}
 
-	vdev = vfio_device_data(device);
+	vdev = container_of(device, struct vfio_pci_device, vdev);
 
 	/* Fault if the device is not unused */
 	if (vdev->refcnt) {
@@ -2262,7 +2245,7 @@ static int vfio_pci_get_unused_devs(struct pci_dev *pdev, void *data)
 		return -EBUSY;
 	}
 
-	devs->devices[devs->cur_index++] = device;
+	devs->devices[devs->cur_index++] = vdev;
 	return 0;
 }
 
@@ -2284,7 +2267,7 @@ static int vfio_pci_try_zap_and_vma_lock_cb(struct pci_dev *pdev, void *data)
 		return -EBUSY;
 	}
 
-	vdev = vfio_device_data(device);
+	vdev = container_of(device, struct vfio_pci_device, vdev);
 
 	/*
 	 * Locking multiple devices is prone to deadlock, runaway and
@@ -2295,7 +2278,7 @@ static int vfio_pci_try_zap_and_vma_lock_cb(struct pci_dev *pdev, void *data)
 		return -EBUSY;
 	}
 
-	devs->devices[devs->cur_index++] = device;
+	devs->devices[devs->cur_index++] = vdev;
 	return 0;
 }
 
@@ -2343,7 +2326,7 @@ static void vfio_pci_try_bus_reset(struct vfio_pci_device *vdev)
 
 	/* Does at least one need a reset? */
 	for (i = 0; i < devs.cur_index; i++) {
-		tmp = vfio_device_data(devs.devices[i]);
+		tmp = devs.devices[i];
 		if (tmp->needs_reset) {
 			ret = pci_reset_bus(vdev->pdev);
 			break;
@@ -2352,7 +2335,7 @@ static void vfio_pci_try_bus_reset(struct vfio_pci_device *vdev)
 
 put_devs:
 	for (i = 0; i < devs.cur_index; i++) {
-		tmp = vfio_device_data(devs.devices[i]);
+		tmp = devs.devices[i];
 
 		/*
 		 * If reset was successful, affected devices no longer need
@@ -2368,7 +2351,7 @@ put_devs:
 				vfio_pci_set_power_state(tmp, PCI_D3hot);
 		}
 
-		vfio_device_put(devs.devices[i]);
+		vfio_device_put(&tmp->vdev);
 	}
 
 	kfree(devs.devices);
