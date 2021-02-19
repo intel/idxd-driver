@@ -24,14 +24,16 @@ MODULE_PARM_DESC(reset_required, "override reset requirement (default: 1)");
 static struct resource *get_platform_resource(struct vfio_platform_device *vdev,
 					      int num)
 {
-	struct platform_device *dev = (struct platform_device *) vdev->opaque;
+	struct platform_device *dev =
+		container_of(vdev->vdev.dev, struct platform_device, dev);
 
 	return platform_get_mem_or_io(dev, num);
 }
 
 static int get_platform_irq(struct vfio_platform_device *vdev, int i)
 {
-	struct platform_device *pdev = (struct platform_device *) vdev->opaque;
+	struct platform_device *pdev =
+		container_of(vdev->vdev.dev, struct platform_device, dev);
 
 	return platform_get_irq_optional(pdev, i);
 }
@@ -45,7 +47,6 @@ static int vfio_platform_probe(struct platform_device *pdev)
 	if (!vdev)
 		return -ENOMEM;
 
-	vdev->opaque = (void *) pdev;
 	vdev->name = pdev->name;
 	vdev->flags = VFIO_DEVICE_FLAGS_PLATFORM;
 	vdev->get_resource = get_platform_resource;

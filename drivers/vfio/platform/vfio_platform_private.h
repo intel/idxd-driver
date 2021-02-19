@@ -59,7 +59,6 @@ struct vfio_platform_device {
 	/*
 	 * These fields should be filled by the bus specific binder
 	 */
-	void		*opaque;
 	const char	*name;
 	uint32_t	flags;
 	/* callbacks to discover device resources */

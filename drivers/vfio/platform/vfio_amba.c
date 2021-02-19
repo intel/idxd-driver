@@ -20,7 +20,7 @@
 static struct resource *get_amba_resource(struct vfio_platform_device *vdev,
 					  int i)
 {
-	struct amba_device *adev = (struct amba_device *) vdev->opaque;
+	struct amba_device *adev = to_amba_device(vdev->vdev.dev);
 
 	if (i == 0)
 		return &adev->res;
@@ -30,7 +30,7 @@ static struct resource *get_amba_resource(struct vfio_platform_device *vdev,
 
 static int get_amba_irq(struct vfio_platform_device *vdev, int i)
 {
-	struct amba_device *adev = (struct amba_device *) vdev->opaque;
+	struct amba_device *adev = to_amba_device(vdev->vdev.dev);
 	int ret = 0;
 
 	if (i < AMBA_NR_IRQS)
@@ -55,7 +55,6 @@ static int vfio_amba_probe(struct amba_device *adev, const struct amba_id *id)
 		return -ENOMEM;
 	}
 
-	vdev->opaque = (void *) adev;
 	vdev->flags = VFIO_DEVICE_FLAGS_AMBA;
 	vdev->get_resource = get_amba_resource;
 	vdev->get_irq = get_amba_irq;
