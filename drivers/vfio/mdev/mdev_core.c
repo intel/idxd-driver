@@ -286,7 +286,7 @@ int mdev_device_create(struct mdev_type *type, const guid_t *uuid)
 		goto mdev_fail;
 	}
 
-	ret = parent->ops->create(&type->kobj, mdev);
+	ret = parent->ops->create(mdev);
 	if (ret)
 		goto ops_create_fail;
 
