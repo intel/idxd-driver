@@ -47,7 +47,7 @@ int  mdev_create_sysfs_files(struct mdev_device *mdev);
 void mdev_remove_sysfs_files(struct mdev_device *mdev);
 
 int mdev_device_create(struct mdev_type *kobj, const guid_t *uuid);
-int  mdev_device_remove(struct mdev_device *dev);
+void mdev_device_remove_locked(struct mdev_device *mdev);
 
 void mdev_release_parent(struct kref *kref);
 

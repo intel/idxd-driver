@@ -18,7 +18,7 @@ struct mdev_device {
 	struct list_head next;
 	struct mdev_type *type;
 	struct device *iommu_device;
-	bool active;
+	struct mutex creation_lock;
 };
 
 static inline struct mdev_device *to_mdev_device(struct device *dev)

@@ -226,19 +226,39 @@ static ssize_t remove_store(struct device *dev, struct device_attribute *attr,
 {
 	struct mdev_device *mdev = to_mdev_device(dev);
 	unsigned long val;
+	ssize_t ret = count;
 
 	if (kstrtoul(buf, 0, &val) < 0)
 		return -EINVAL;
 
-	if (val && device_remove_file_self(dev, attr)) {
-		int ret;
+	/* Check if parent unregistration has started */
+	if (!down_read_trylock(&mdev->type->parent->unreg_sem))
+		return -ENODEV;
 
-		ret = mdev_device_remove(mdev);
-		if (ret)
-			return ret;
+	/*
+	 * Normally a sysfs callback would be be protected against dev being
+	 * freed by the sys core. Once we call device_remove_file_self() we
+	 * loose that protection, so the put_device() inside
+	 * mdev_device_remove_locked() will actually free the memory. Hold
+	 * another reference so we can unlock the locks.
+	 */
+	get_device(&mdev->dev);
+
+	/* Exclude races with concurrent, unfinished, creation of this device */
+	if (!mutex_trylock(&mdev->creation_lock)) {
+		ret = -EBUSY;
+		goto out_unreg_sem;
 	}
 
-	return count;
+	if (val && device_remove_file_self(dev, attr))
+		mdev_device_remove_locked(mdev);
+
+	mutex_unlock(&mdev->creation_lock);
+
+out_unreg_sem:
+	up_read(&mdev->type->parent->unreg_sem);
+	put_device(&mdev->dev);
+	return ret;
 }
 
 static DEVICE_ATTR_WO(remove);
