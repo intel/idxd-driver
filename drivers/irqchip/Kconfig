@@ -577,4 +577,18 @@ config MST_IRQ
 	help
 	  Support MStar Interrupt Controller.
 
+config IMS_MSI
+	depends on PCI
+	select DEVICE_MSI
+	bool
+
+config IMS_MSI_ARRAY
+	bool "IMS Interrupt Message Store MSI controller for device memory storage arrays"
+	depends on PCI
+	select IMS_MSI
+	select GENERIC_MSI_IRQ_DOMAIN
+	help
+	  Support for IMS Interrupt Message Store MSI controller
+	  with IMS slot storage in a slot array in device memory
+
 endmenu
