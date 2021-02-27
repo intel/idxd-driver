@@ -94,9 +94,11 @@ static void mdev_device_remove_common(struct mdev_device *mdev)
 	mdev_remove_sysfs_files(mdev);
 	device_del(&mdev->dev);
 	lockdep_assert_held(&parent->unreg_sem);
-	ret = parent->ops->remove(mdev);
-	if (ret)
-		dev_err(&mdev->dev, "Remove failed: err=%d\n", ret);
+	if (parent->ops->remove) {
+		ret = parent->ops->remove(mdev);
+		if (ret)
+			dev_err(&mdev->dev, "Remove failed: err=%d\n", ret);
+	}
 
 	/* Balances with device_initialize() */
 	put_device(&mdev->dev);
@@ -127,7 +129,9 @@ int mdev_register_device(struct device *dev, const struct mdev_parent_ops *ops)
 	char *envp[] = { env_string, NULL };
 
 	/* check for mandatory ops */
-	if (!ops || !ops->create || !ops->remove || !ops->supported_type_groups)
+	if (!ops || !ops->supported_type_groups)
+		return -EINVAL;
+	if (!ops->device_driver && (!ops->create || !ops->remove))
 		return -EINVAL;
 
 	dev = get_device(dev);
@@ -296,9 +300,11 @@ int mdev_device_create(struct mdev_type *type, const guid_t *uuid)
 		goto mdev_fail;
 	}
 
-	ret = parent->ops->create(mdev);
-	if (ret)
-		goto ops_create_fail;
+	if (parent->ops->create) {
+		ret = parent->ops->create(mdev);
+		if (ret)
+			goto ops_create_fail;
+	}
 
 	ret = device_add(&mdev->dev);
 	if (ret)
@@ -317,7 +323,8 @@ int mdev_device_create(struct mdev_type *type, const guid_t *uuid)
 sysfs_fail:
 	device_del(&mdev->dev);
 add_fail:
-	parent->ops->remove(mdev);
+	if (parent->ops->remove)
+		parent->ops->remove(mdev);
 ops_create_fail:
 	up_read(&parent->unreg_sem);
 mdev_fail:
@@ -360,7 +367,18 @@ int mdev_device_remove(struct mdev_device *mdev)
 
 static int __init mdev_init(void)
 {
-	return mdev_bus_register();
+	int ret;
+
+	ret = mdev_bus_register();
+	if (ret)
+		return ret;
+	ret = mdev_register_driver(&vfio_mdev_driver);
+	if (ret)
+		goto err_bus;
+	return 0;
+err_bus:
+	mdev_bus_unregister();
+	return ret;
 }
 
 static void __exit mdev_exit(void)
@@ -368,6 +386,7 @@ static void __exit mdev_exit(void)
 	if (mdev_bus_compat_class)
 		class_compat_unregister(mdev_bus_compat_class);
 
+	mdev_unregister_driver(&vfio_mdev_driver);
 	mdev_bus_unregister();
 }
 
