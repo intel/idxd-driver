@@ -239,7 +239,7 @@ static void mbochs_create_config_space(struct mdev_state *mdev_state)
 static int mbochs_check_framebuffer(struct mdev_state *mdev_state,
 				    struct mbochs_mode *mode)
 {
-	struct device *dev = mdev_dev(mdev_state->mdev);
+	struct device *dev = mdev_state->vdev.dev;
 	u16 *vbe = mdev_state->vbe;
 	u32 virt_width;
 
@@ -297,7 +297,7 @@ static bool mbochs_modes_equal(struct mbochs_mode *mode1,
 static void handle_pci_cfg_write(struct mdev_state *mdev_state, u16 offset,
 				 char *buf, u32 count)
 {
-	struct device *dev = mdev_dev(mdev_state->mdev);
+	struct device *dev = mdev_state->vdev.dev;
 	int index = (offset - PCI_BASE_ADDRESS_0) / 0x04;
 	u32 cfg_addr;
 
@@ -325,7 +325,7 @@ static void handle_pci_cfg_write(struct mdev_state *mdev_state, u16 offset,
 static void handle_mmio_write(struct mdev_state *mdev_state, u16 offset,
 			      char *buf, u32 count)
 {
-	struct device *dev = mdev_dev(mdev_state->mdev);
+	struct device *dev = mdev_state->vdev.dev;
 	int index;
 	u16 reg16;
 
@@ -355,7 +355,7 @@ unhandled:
 static void handle_mmio_read(struct mdev_state *mdev_state, u16 offset,
 			     char *buf, u32 count)
 {
-	struct device *dev = mdev_dev(mdev_state->mdev);
+	struct device *dev = mdev_state->vdev.dev;
 	struct vfio_region_gfx_edid *edid;
 	u16 reg16 = 0;
 	int index;
@@ -509,7 +509,7 @@ static int mbochs_probe(struct mdev_device *mdev)
 {
 	const struct mbochs_type *type =
 		&mbochs_types[mdev_get_type_group_id(mdev)];
-	struct device *dev = mdev_dev(mdev);
+	struct device *dev = &mdev->dev;
 	struct mdev_state *mdev_state;
 	int ret = -ENOMEM;
 
@@ -729,7 +729,7 @@ static struct page *mbochs_get_page(struct mdev_state *mdev_state,
 
 static void mbochs_put_pages(struct mdev_state *mdev_state)
 {
-	struct device *dev = mdev_dev(mdev_state->mdev);
+	struct device *dev = mdev_state->vdev.dev;
 	int i, count = 0;
 
 	WARN_ON(!mutex_is_locked(&mdev_state->ops_lock));
@@ -803,7 +803,7 @@ static const struct vm_operations_struct mbochs_dmabuf_vm_ops = {
 static int mbochs_mmap_dmabuf(struct dma_buf *buf, struct vm_area_struct *vma)
 {
 	struct mbochs_dmabuf *dmabuf = buf->priv;
-	struct device *dev = mdev_dev(dmabuf->mdev_state->mdev);
+	struct device *dev = dmabuf->mdev_state->vdev.dev;
 
 	dev_dbg(dev, "%s: %d\n", __func__, dmabuf->id);
 
@@ -818,7 +818,7 @@ static int mbochs_mmap_dmabuf(struct dma_buf *buf, struct vm_area_struct *vma)
 static void mbochs_print_dmabuf(struct mbochs_dmabuf *dmabuf,
 				const char *prefix)
 {
-	struct device *dev = mdev_dev(dmabuf->mdev_state->mdev);
+	struct device *dev = dmabuf->mdev_state->vdev.dev;
 	u32 fourcc = dmabuf->mode.drm_format;
 
 	dev_dbg(dev, "%s/%d: %c%c%c%c, %dx%d, stride %d, off 0x%llx, size 0x%llx, pages %ld\n",
@@ -835,7 +835,7 @@ static struct sg_table *mbochs_map_dmabuf(struct dma_buf_attachment *at,
 					  enum dma_data_direction direction)
 {
 	struct mbochs_dmabuf *dmabuf = at->dmabuf->priv;
-	struct device *dev = mdev_dev(dmabuf->mdev_state->mdev);
+	struct device *dev = dmabuf->mdev_state->vdev.dev;
 	struct sg_table *sg;
 
 	dev_dbg(dev, "%s: %d\n", __func__, dmabuf->id);
@@ -864,7 +864,7 @@ static void mbochs_unmap_dmabuf(struct dma_buf_attachment *at,
 				enum dma_data_direction direction)
 {
 	struct mbochs_dmabuf *dmabuf = at->dmabuf->priv;
-	struct device *dev = mdev_dev(dmabuf->mdev_state->mdev);
+	struct device *dev = dmabuf->mdev_state->vdev.dev;
 
 	dev_dbg(dev, "%s: %d\n", __func__, dmabuf->id);
 
@@ -877,7 +877,7 @@ static void mbochs_release_dmabuf(struct dma_buf *buf)
 {
 	struct mbochs_dmabuf *dmabuf = buf->priv;
 	struct mdev_state *mdev_state = dmabuf->mdev_state;
-	struct device *dev = mdev_dev(mdev_state->mdev);
+	struct device *dev = dmabuf->mdev_state->vdev.dev;
 	pgoff_t pg;
 
 	dev_dbg(dev, "%s: %d\n", __func__, dmabuf->id);
