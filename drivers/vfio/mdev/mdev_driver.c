@@ -75,7 +75,7 @@ static int mdev_match(struct device *dev, struct device_driver *drv)
 {
 	struct mdev_device *mdev = to_mdev_device(dev);
 
-	return drv == &mdev->type->parent->ops->device_driver->driver;
+	return drv == &mdev->type->parent->mdev_driver->driver;
 }
 
 struct bus_type mdev_bus_type = {

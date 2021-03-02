@@ -1669,10 +1669,6 @@ static struct mdev_driver intel_vgpu_mdev_driver = {
 	.remove	= intel_vgpu_remove,
 };
 
-static struct mdev_parent_ops intel_vgpu_ops = {
-	.device_driver		= &intel_vgpu_mdev_driver,
-};
-
 static int kvmgt_host_init(struct device *dev, void *gvt, const void *ops)
 {
 	struct attribute_group **kvm_vgpu_type_groups;
@@ -1680,9 +1676,9 @@ static int kvmgt_host_init(struct device *dev, void *gvt, const void *ops)
 	intel_gvt_ops = ops;
 	if (!intel_gvt_ops->get_gvt_attrs(&kvm_vgpu_type_groups))
 		return -EFAULT;
-	intel_vgpu_ops.supported_type_groups = kvm_vgpu_type_groups;
+	intel_vgpu_mdev_driver.supported_type_groups = kvm_vgpu_type_groups;
 
-	return mdev_register_device(dev, &intel_vgpu_ops);
+	return mdev_register_device(dev, &intel_vgpu_mdev_driver);
 }
 
 static void kvmgt_host_exit(struct device *dev)

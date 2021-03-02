@@ -97,7 +97,7 @@ static struct mdev_type *add_mdev_supported_type(struct mdev_parent *parent,
 {
 	struct mdev_type *type;
 	struct attribute_group *group =
-		parent->ops->supported_type_groups[type_group_id];
+		parent->mdev_driver->supported_type_groups[type_group_id];
 	int ret;
 
 	if (!group->name) {
@@ -167,7 +167,7 @@ static int add_mdev_supported_type_groups(struct mdev_parent *parent)
 {
 	int i;
 
-	for (i = 0; parent->ops->supported_type_groups[i]; i++) {
+	for (i = 0; parent->mdev_driver->supported_type_groups[i]; i++) {
 		struct mdev_type *type;
 
 		type = add_mdev_supported_type(parent, i);
