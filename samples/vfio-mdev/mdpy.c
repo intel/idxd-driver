@@ -142,7 +142,7 @@ static void mdpy_create_config_space(struct mdev_state *mdev_state)
 static void handle_pci_cfg_write(struct mdev_state *mdev_state, u16 offset,
 				 char *buf, u32 count)
 {
-	struct device *dev = mdev_dev(mdev_state->mdev);
+	struct device *dev = mdev_state->vdev.dev;
 	u32 cfg_addr;
 
 	switch (offset) {
@@ -220,7 +220,7 @@ static int mdpy_probe(struct mdev_device *mdev)
 {
 	const struct mdpy_type *type =
 		&mdpy_types[mdev_get_type_group_id(mdev)];
-	struct device *dev = mdev_dev(mdev);
+	struct device *dev = &mdev->dev;
 	struct mdev_state *mdev_state;
 	u32 fbsize;
 	int ret;

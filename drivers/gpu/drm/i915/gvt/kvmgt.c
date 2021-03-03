@@ -717,7 +717,7 @@ static int intel_vgpu_probe(struct mdev_device *mdev)
 	dev_set_drvdata(&mdev->dev, vdev);
 
 	gvt_dbg_core("intel_vgpu_create succeeded for mdev: %s\n",
-		     dev_name(mdev_dev(mdev)));
+		     dev_name(&mdev->dev));
 	return 0;
 }
 
