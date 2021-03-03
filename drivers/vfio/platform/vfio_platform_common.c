@@ -663,7 +663,6 @@ static int vfio_platform_of_probe(struct vfio_platform_device *vdev,
 int vfio_platform_probe_common(struct vfio_platform_device *vdev,
 			       struct device *dev)
 {
-	struct iommu_group *group;
 	int ret;
 
 	vfio_init_group_dev(&vdev->vdev, dev, &vfio_platform_ops);
@@ -682,24 +681,15 @@ int vfio_platform_probe_common(struct vfio_platform_device *vdev,
 		return ret;
 	}
 
-	group = vfio_iommu_group_get(dev);
-	if (!group) {
-		dev_err(dev, "No IOMMU group for device %s\n", vdev->name);
-		ret = -EINVAL;
-		goto put_reset;
-	}
-
 	ret = vfio_register_group_dev(&vdev->vdev);
 	if (ret)
-		goto put_iommu;
+		goto put_reset;
 
 	mutex_init(&vdev->igate);
 
 	pm_runtime_enable(dev);
 	return 0;
 
-put_iommu:
-	vfio_iommu_group_put(group, dev);
 put_reset:
 	vfio_platform_put_reset(vdev);
 	return ret;
@@ -712,7 +702,6 @@ void vfio_platform_remove_common(struct vfio_platform_device *vdev)
 
 	pm_runtime_disable(vdev->vdev.dev);
 	vfio_platform_put_reset(vdev);
-	vfio_iommu_group_put(vdev->vdev.dev->iommu_group, vdev->vdev.dev);
 }
 EXPORT_SYMBOL_GPL(vfio_platform_remove_common);
 

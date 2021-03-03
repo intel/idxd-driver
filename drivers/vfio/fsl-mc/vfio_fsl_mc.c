@@ -588,22 +588,13 @@ out_nc_unreg:
 
 static int vfio_fsl_mc_probe(struct fsl_mc_device *mc_dev)
 {
-	struct iommu_group *group;
 	struct vfio_fsl_mc_device *vdev;
 	struct device *dev = &mc_dev->dev;
 	int ret;
 
-	group = vfio_iommu_group_get(dev);
-	if (!group) {
-		dev_err(dev, "VFIO_FSL_MC: No IOMMU group\n");
-		return -EINVAL;
-	}
-
 	vdev = kzalloc(sizeof(*vdev), GFP_KERNEL);
-	if (!vdev) {
-		ret = -ENOMEM;
-		goto out_group_put;
-	}
+	if (!vdev)
+		return -ENOMEM;
 
 	vfio_init_group_dev(&vdev->vdev, dev, &vfio_fsl_mc_ops);
 	mutex_init(&vdev->igate);
@@ -635,8 +626,6 @@ out_group_dev:
 	vfio_unregister_group_dev(&vdev->vdev);
 out_kfree:
 	kfree(vdev);
-out_group_put:
-	vfio_iommu_group_put(group, dev);
 	return ret;
 }
 
@@ -659,7 +648,6 @@ static int vfio_fsl_mc_remove(struct fsl_mc_device *mc_dev)
 		bus_unregister_notifier(&fsl_mc_bus_type, &vdev->nb);
 
 	kfree(vdev);
-	vfio_iommu_group_put(mc_dev->dev.iommu_group, dev);
 	return 0;
 }
 

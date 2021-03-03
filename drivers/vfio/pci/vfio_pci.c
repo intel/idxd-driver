@@ -1959,7 +1959,6 @@ static int vfio_pci_bus_notifier(struct notifier_block *nb,
 static int vfio_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 {
 	struct vfio_pci_device *vdev;
-	struct iommu_group *group;
 	int ret;
 
 	if (vfio_pci_is_denylisted(pdev))
@@ -1981,15 +1980,9 @@ static int vfio_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 		return -EBUSY;
 	}
 
-	group = vfio_iommu_group_get(&pdev->dev);
-	if (!group)
-		return -EINVAL;
-
 	vdev = kzalloc(sizeof(*vdev), GFP_KERNEL);
-	if (!vdev) {
-		ret = -ENOMEM;
-		goto out_group_put;
-	}
+	if (!vdev)
+		return -ENOMEM;
 
 	vfio_init_group_dev(&vdev->vdev, &pdev->dev, &vfio_pci_ops);
 	vdev->irq_type = VFIO_PCI_NUM_IRQS;
@@ -2064,8 +2057,6 @@ out_del_group_dev:
 	vfio_unregister_group_dev(&vdev->vdev);
 out_free:
 	kfree(vdev);
-out_group_put:
-	vfio_iommu_group_put(group, &pdev->dev);
 	return ret;
 }
 
@@ -2088,7 +2079,6 @@ static void vfio_pci_remove(struct pci_dev *pdev)
 
 	vfio_pci_reflck_put(vdev->reflck);
 
-	vfio_iommu_group_put(pdev->dev.iommu_group, &pdev->dev);
 	kfree(vdev->region);
 	mutex_destroy(&vdev->ioeventfds_lock);
 
