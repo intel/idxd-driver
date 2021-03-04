@@ -1257,6 +1257,7 @@ int drv_enable_wq(struct idxd_wq *wq)
 	mutex_unlock(&wq->wq_lock);
 	return rc;
 }
+EXPORT_SYMBOL_GPL(drv_enable_wq);
 
 void __drv_disable_wq(struct idxd_wq *wq)
 {
@@ -1283,6 +1284,7 @@ void drv_disable_wq(struct idxd_wq *wq)
 	__drv_disable_wq(wq);
 	mutex_unlock(&wq->wq_lock);
 }
+EXPORT_SYMBOL_GPL(drv_disable_wq);
 
 int idxd_device_drv_probe(struct device *dev)
 {

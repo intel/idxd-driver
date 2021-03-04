@@ -989,6 +989,3 @@ static void vidxd_do_command(struct vdcm_idxd *vidxd, u32 val)
 		break;
 	}
 }
-
-MODULE_IMPORT_NS(IDXD);
-MODULE_LICENSE("GPL v2");

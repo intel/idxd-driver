@@ -11,6 +11,7 @@
 #include <linux/idr.h>
 #include <linux/pci.h>
 #include <linux/perf_event.h>
+#include <linux/mdev.h>
 #include "registers.h"
 
 #define IDXD_DRIVER_VERSION	"1.00"
@@ -60,6 +61,7 @@ static const char idxd_dsa_drv_name[] = "dsa";
 static const char idxd_dev_drv_name[] = "idxd";
 static const char idxd_dmaengine_drv_name[] = "dmaengine";
 static const char idxd_user_drv_name[] = "user";
+static const char idxd_mdev_drv_name[] = "mdev";
 
 struct idxd_irq_entry {
 	struct idxd_device *idxd;
@@ -297,6 +299,10 @@ struct idxd_device {
 	int *int_handles;
 
 	struct idxd_pmu *idxd_pmu;
+
+	struct kref mdev_kref;
+	struct mutex kref_lock; /* lock for the mdev_kref */
+	bool mdev_host_init;
 };
 
 /* IDXD software descriptor */
@@ -586,6 +592,10 @@ void idxd_cdev_remove(void);
 int idxd_cdev_get_major(struct idxd_device *idxd);
 int idxd_wq_add_cdev(struct idxd_wq *wq);
 void idxd_wq_del_cdev(struct idxd_wq *wq);
+
+/* mdev host */
+int idxd_mdev_host_init(struct idxd_device *idxd, struct mdev_driver *drv);
+void idxd_mdev_host_release(struct kref *kref);
 
 /* perfmon */
 #if IS_ENABLED(CONFIG_INTEL_IDXD_PERFMON)

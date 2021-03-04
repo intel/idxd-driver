@@ -63,6 +63,41 @@ static struct pci_device_id idxd_pci_tbl[] = {
 };
 MODULE_DEVICE_TABLE(pci, idxd_pci_tbl);
 
+int idxd_mdev_host_init(struct idxd_device *idxd, struct mdev_driver *drv)
+{
+	struct device *dev = &idxd->pdev->dev;
+	int rc;
+
+	if (!idxd->ims_size)
+		return -EOPNOTSUPP;
+
+	rc = iommu_dev_enable_feature(dev, IOMMU_DEV_FEAT_AUX);
+	if (rc < 0) {
+		dev_warn(dev, "Failed to enable aux-domain: %d\n", rc);
+		return rc;
+	}
+
+	rc = mdev_register_device(dev, drv);
+	if (rc < 0) {
+		iommu_dev_disable_feature(dev, IOMMU_DEV_FEAT_AUX);
+		return rc;
+	}
+
+	idxd->mdev_host_init = true;
+	return 0;
+}
+EXPORT_SYMBOL_GPL(idxd_mdev_host_init);
+
+void idxd_mdev_host_release(struct kref *kref)
+{
+	struct idxd_device *idxd = container_of(kref, struct idxd_device, mdev_kref);
+	struct device *dev = &idxd->pdev->dev;
+
+	mdev_unregister_device(dev);
+	iommu_dev_disable_feature(dev, IOMMU_DEV_FEAT_AUX);
+}
+EXPORT_SYMBOL_GPL(idxd_mdev_host_release);
+
 static int idxd_setup_interrupts(struct idxd_device *idxd)
 {
 	struct pci_dev *pdev = idxd->pdev;
@@ -351,6 +386,9 @@ static int idxd_setup_internals(struct idxd_device *idxd)
 		rc = -ENOMEM;
 		goto err_wkq_create;
 	}
+
+	kref_init(&idxd->mdev_kref);
+	mutex_init(&idxd->kref_lock);
 
 	return 0;
 
@@ -741,6 +779,7 @@ static void idxd_remove(struct pci_dev *pdev)
 
 	dev_dbg(&pdev->dev, "%s called\n", __func__);
 	idxd_shutdown(pdev);
+	kref_put_mutex(&idxd->mdev_kref, idxd_mdev_host_release, &idxd->kref_lock);
 	if (device_pasid_enabled(idxd))
 		idxd_disable_system_pasid(idxd);
 	idxd_unregister_devices(idxd);

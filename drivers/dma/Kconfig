@@ -281,6 +281,7 @@ config INTEL_IDXD
 	depends on PCI && X86_64
 	depends on PCI_MSI
 	depends on SBITMAP
+	depends on IMS_MSI_ARRAY
 	select DMA_ENGINE
 	help
 	  Enable support for the Intel(R) data accelerators present
