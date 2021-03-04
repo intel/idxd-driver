@@ -573,13 +573,14 @@ static bool vfio_dev_driver_allowed(struct device *dev,
  * unbound_list, indicating it's in the middle of transitioning from
  * a vfio driver to driver-less.
  */
-static int vfio_dev_viable(struct device *dev, void *data)
+static int vfio_dev_viable(struct device *dev, struct vfio_group *group)
 {
-	struct vfio_group *group = data;
 	struct vfio_device *device;
-	struct device_driver *drv = READ_ONCE(dev->driver);
+	struct device_driver *drv = dev->driver;
 	struct vfio_unbound_dev *unbound;
 	int ret = -EINVAL;
+
+	device_lock_assert(dev);
 
 	mutex_lock(&group->unbound_lock);
 	list_for_each_entry(unbound, &group->unbound_list, unbound_next) {
@@ -1309,10 +1310,20 @@ unlock_out:
 	return ret;
 }
 
+static int vfio_dev_viable_unlocked(struct device *dev, void *data)
+{
+	int ret;
+
+	device_lock(dev);
+	ret = vfio_dev_viable(dev, data);
+	device_unlock(dev);
+	return ret;
+}
+
 static bool vfio_group_viable(struct vfio_group *group)
 {
 	return (iommu_group_for_each_dev(group->iommu_group,
-					 group, vfio_dev_viable) == 0);
+					 group, vfio_dev_viable_unlocked) == 0);
 }
 
 static int vfio_group_add_container_user(struct vfio_group *group)
