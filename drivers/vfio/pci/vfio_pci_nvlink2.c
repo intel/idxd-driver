@@ -105,7 +105,7 @@ static void vfio_pci_nvgpu_release(struct vfio_pci_device *vdev,
 		mmdrop(data->mm);
 	}
 
-	vfio_unregister_notifier(&data->gpdev->dev, VFIO_GROUP_NOTIFY,
+	vfio_unregister_notifier(&vdev->vdev, VFIO_GROUP_NOTIFY,
 			&data->group_notifier);
 
 	pnv_npu2_unmap_lpar_dev(data->gpdev);
@@ -263,7 +263,7 @@ int vfio_pci_nvdia_v100_nvlink2_init(struct vfio_pci_device *vdev)
 	data->gpdev = npdev;
 	data->group_notifier.notifier_call = vfio_pci_nvgpu_group_notifier;
 
-	ret = vfio_register_notifier(&data->gpdev->dev, VFIO_GROUP_NOTIFY,
+	ret = vfio_register_notifier(&vdev->vdev, VFIO_GROUP_NOTIFY,
 			&events, &data->group_notifier);
 	if (ret)
 		goto free_exit;
@@ -274,7 +274,7 @@ int vfio_pci_nvdia_v100_nvlink2_init(struct vfio_pci_device *vdev)
 	 * assigned, we will get several similar notifiers notifying about
 	 * the same device again which does not help with anything.
 	 */
-	vfio_unregister_notifier(&data->gpdev->dev, VFIO_GROUP_NOTIFY,
+	vfio_unregister_notifier(&vdev->vdev, VFIO_GROUP_NOTIFY,
 			&data->group_notifier);
 
 	ret = vfio_pci_register_dev_region(vdev,
