@@ -10,6 +10,8 @@
 #include "registers.h"
 #include "idxd.h"
 
+static struct idxd_device_driver dsa_drv;
+
 static char *idxd_wq_type_names[] = {
 	[IDXD_WQT_NONE]		= "none",
 	[IDXD_WQT_KERNEL]	= "kernel",
@@ -21,10 +23,16 @@ static bool is_idxd_dev_drv(struct device_driver *drv)
 	return strncmp(drv->name, idxd_dev_drv_name, strlen(idxd_dev_drv_name)) == 0;
 }
 
+static bool is_dsa_drv(struct device_driver *drv)
+{
+	return strncmp(drv->name, idxd_dsa_drv_name, strlen(idxd_dsa_drv_name)) == 0;
+}
+
 static int idxd_config_bus_match(struct device *dev,
 				 struct device_driver *drv)
 {
-	return (is_idxd_dev(dev) && is_idxd_dev_drv(drv));
+	return ((is_idxd_dev(dev) && is_idxd_dev_drv(drv)) ||
+	       (is_idxd_wq_dev(dev) && !is_idxd_dev_drv(drv) && !is_dsa_drv(drv)));
 }
 
 static int idxd_config_bus_probe(struct device *dev)

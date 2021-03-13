@@ -58,6 +58,7 @@ struct idxd_device_driver {
 
 static const char idxd_dsa_drv_name[] = "dsa";
 static const char idxd_dev_drv_name[] = "idxd";
+static const char idxd_dmaengine_drv_name[] = "dmaengine";
 
 struct idxd_irq_entry {
 	struct idxd_device *idxd;
@@ -401,7 +402,9 @@ static inline bool is_idxd_dev(struct device *dev)
 
 static inline bool is_idxd_wq_dev(struct device *dev)
 {
-	return dev->type == &idxd_wq_device_type;
+	struct idxd_dev *idev = confdev_to_idxd_dev(dev);
+
+	return idev->type == IDXD_DEV_WQ;
 }
 
 static inline bool is_idxd_wq_dmaengine(struct idxd_wq *wq)
@@ -429,6 +432,11 @@ static inline bool wq_shared(struct idxd_wq *wq)
 static inline bool device_pasid_enabled(struct idxd_device *idxd)
 {
 	return test_bit(IDXD_FLAG_PASID_ENABLED, &idxd->flags);
+}
+
+static inline bool is_idxd_wq_kernel(struct idxd_wq *wq)
+{
+	return (wq->type == IDXD_WQT_KERNEL);
 }
 
 static inline bool device_swq_supported(struct idxd_device *idxd)
@@ -504,7 +512,9 @@ void idxd_unregister_idxd_drv(void);
 int idxd_device_drv_probe(struct device *dev);
 void idxd_device_drv_remove(struct device *dev);
 int drv_enable_wq(struct idxd_wq *wq);
+int __drv_enable_wq(struct idxd_wq *wq);
 void drv_disable_wq(struct idxd_wq *wq);
+void __drv_disable_wq(struct idxd_wq *wq);
 int idxd_device_init_reset(struct idxd_device *idxd);
 int idxd_device_enable(struct idxd_device *idxd);
 int idxd_device_disable(struct idxd_device *idxd);
@@ -541,6 +551,8 @@ struct idxd_desc *idxd_alloc_desc(struct idxd_wq *wq, enum idxd_op_type optype);
 void idxd_free_desc(struct idxd_wq *wq, struct idxd_desc *desc);
 
 /* dmaengine */
+int idxd_register_kernel_drv(void);
+void idxd_unregister_kernel_drv(void);
 int idxd_register_dma_device(struct idxd_device *idxd);
 void idxd_unregister_dma_device(struct idxd_device *idxd);
 int idxd_register_dma_channel(struct idxd_wq *wq);

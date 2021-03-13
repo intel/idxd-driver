@@ -262,3 +262,83 @@ void idxd_unregister_dma_channel(struct idxd_wq *wq)
 	wq->idxd_chan = NULL;
 	put_device(wq_confdev(wq));
 }
+
+static int idxd_dmaengine_drv_probe(struct device *dev)
+{
+	struct idxd_wq *wq = confdev_to_wq(dev);
+	int rc;
+
+	if (!is_idxd_wq_kernel(wq))
+		return -ENODEV;
+
+	mutex_lock(&wq->wq_lock);
+	rc = __drv_enable_wq(wq);
+	if (rc < 0) {
+		dev_dbg(dev, "Enable wq %d failed: %d\n", wq->id, rc);
+		rc = -ENXIO;
+		goto err;
+	}
+
+	rc = idxd_wq_alloc_resources(wq);
+	if (rc < 0) {
+		dev_dbg(dev, "WQ resource alloc failed\n");
+		goto err_res_alloc;
+	}
+
+	rc = idxd_wq_init_percpu_ref(wq);
+	if (rc < 0) {
+		dev_dbg(dev, "percpu_ref setup failed\n");
+		goto err_ref;
+	}
+
+	rc = idxd_register_dma_channel(wq);
+	if (rc < 0) {
+		dev_dbg(dev, "Failed to register dma channel\n");
+		goto err_dma;
+	}
+
+	get_device(dev);
+	mutex_unlock(&wq->wq_lock);
+	dev_info(dev, "wq %s enabled\n", dev_name(dev));
+	return 0;
+
+err_dma:
+	idxd_wq_quiesce(wq);
+err_ref:
+	idxd_wq_free_resources(wq);
+err_res_alloc:
+	__drv_disable_wq(wq);
+err:
+	mutex_unlock(&wq->wq_lock);
+	return rc;
+}
+
+static void idxd_dmaengine_drv_remove(struct device *dev)
+{
+	struct idxd_wq *wq = confdev_to_wq(dev);
+
+	mutex_lock(&wq->wq_lock);
+	idxd_wq_quiesce(wq);
+	idxd_unregister_dma_channel(wq);
+	__drv_disable_wq(wq);
+	idxd_wq_free_resources(wq);
+	put_device(dev);
+	mutex_unlock(&wq->wq_lock);
+	dev_info(dev, "wq %s disabled\n", dev_name(dev));
+}
+
+struct idxd_device_driver idxd_dmaengine_drv = {
+	.probe = idxd_dmaengine_drv_probe,
+	.remove = idxd_dmaengine_drv_remove,
+	.name = idxd_dmaengine_drv_name,
+};
+
+int idxd_register_kernel_drv(void)
+{
+	return idxd_driver_register(&idxd_dmaengine_drv);
+}
+
+void idxd_unregister_kernel_drv(void)
+{
+	idxd_driver_unregister(&idxd_dmaengine_drv);
+}
