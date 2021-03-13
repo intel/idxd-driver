@@ -59,6 +59,7 @@ struct idxd_device_driver {
 static const char idxd_dsa_drv_name[] = "dsa";
 static const char idxd_dev_drv_name[] = "idxd";
 static const char idxd_dmaengine_drv_name[] = "dmaengine";
+static const char idxd_user_drv_name[] = "user";
 
 struct idxd_irq_entry {
 	struct idxd_device *idxd;
@@ -414,7 +415,7 @@ static inline bool is_idxd_wq_dmaengine(struct idxd_wq *wq)
 	return false;
 }
 
-static inline bool is_idxd_wq_cdev(struct idxd_wq *wq)
+static inline bool is_idxd_wq_user(struct idxd_wq *wq)
 {
 	return wq->type == IDXD_WQT_USER;
 }
@@ -562,6 +563,8 @@ void idxd_dma_complete_txd(struct idxd_desc *desc,
 			   enum idxd_complete_type comp_type);
 
 /* cdev */
+int idxd_register_user_drv(void);
+void idxd_unregister_user_drv(void);
 int idxd_cdev_register(void);
 void idxd_cdev_remove(void);
 int idxd_cdev_get_major(struct idxd_device *idxd);

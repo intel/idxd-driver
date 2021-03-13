@@ -305,6 +305,63 @@ void idxd_wq_del_cdev(struct idxd_wq *wq)
 	put_device(cdev_dev(idxd_cdev));
 }
 
+static int idxd_user_drv_probe(struct device *dev)
+{
+	struct idxd_wq *wq = confdev_to_wq(dev);
+	int rc;
+
+	if (!is_idxd_wq_user(wq))
+		return -ENODEV;
+
+	mutex_lock(&wq->wq_lock);
+	rc = __drv_enable_wq(wq);
+	if (rc < 0)
+		goto err;
+
+	rc = idxd_wq_add_cdev(wq);
+	if (rc < 0)
+		goto err_cdev;
+
+	get_device(dev);
+	mutex_unlock(&wq->wq_lock);
+	dev_info(dev, "wq %s enabled\n", dev_name(dev));
+	return 0;
+
+err_cdev:
+	__drv_disable_wq(wq);
+err:
+	mutex_unlock(&wq->wq_lock);
+	return rc;
+}
+
+static void idxd_user_drv_remove(struct device *dev)
+{
+	struct idxd_wq *wq = confdev_to_wq(dev);
+
+	mutex_lock(&wq->wq_lock);
+	idxd_wq_del_cdev(wq);
+	__drv_disable_wq(wq);
+	put_device(dev);
+	mutex_unlock(&wq->wq_lock);
+	dev_info(dev, "wq %s disabled\n", dev_name(dev));
+}
+
+struct idxd_device_driver idxd_user_drv = {
+	.probe = idxd_user_drv_probe,
+	.remove = idxd_user_drv_remove,
+	.name = idxd_user_drv_name,
+};
+
+int idxd_register_user_drv(void)
+{
+	return idxd_driver_register(&idxd_user_drv);
+}
+
+void idxd_unregister_user_drv(void)
+{
+	idxd_driver_unregister(&idxd_user_drv);
+}
+
 int idxd_cdev_register(void)
 {
 	int rc, i;
