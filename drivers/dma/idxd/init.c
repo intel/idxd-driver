@@ -843,8 +843,10 @@ int __idxd_driver_register(struct idxd_device_driver *idxd_drv, struct module *o
 
 	return driver_register(drv);
 }
+EXPORT_SYMBOL_GPL(__idxd_driver_register);
 
 void idxd_driver_unregister(struct idxd_device_driver *idxd_drv)
 {
 	driver_unregister(&idxd_drv->drv);
 }
+EXPORT_SYMBOL_GPL(idxd_driver_unregister);

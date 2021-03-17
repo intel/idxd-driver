@@ -483,10 +483,16 @@ static inline int idxd_wq_refcount(struct idxd_wq *wq)
 	return wq->client_count;
 };
 
+#define MODULE_ALIAS_IDXD_DEVICE(type) MODULE_ALIAS("idxd:t" __stringify(type) "*")
+#define IDXD_DEVICES_MODALIAS_FMT "idxd:t%d"
+
 int __must_check __idxd_driver_register(struct idxd_device_driver *idxd_drv,
 					struct module *module, const char *mod_name);
 #define idxd_driver_register(driver) \
 	__idxd_driver_register(driver, THIS_MODULE, KBUILD_MODNAME)
+
+#define module_idxd_driver(driver) \
+	module_driver(driver, idxd_driver_register, idxd_driver_unregister)
 
 void idxd_driver_unregister(struct idxd_device_driver *idxd_drv);
 
