@@ -10,7 +10,25 @@
 #ifndef MDEV_H
 #define MDEV_H
 
+#include <linux/irqbypass.h>
+
 struct mdev_type;
+
+struct mdev_irq_entry {
+	struct eventfd_ctx *trigger;
+	struct irq_bypass_producer producer;
+	char *name;
+	bool ims;
+	int ims_id;
+};
+
+struct mdev_irq {
+	struct mdev_irq_entry *irq_entries;
+	int num;
+	int ims_num;
+	int irq_type;
+	int pasid;
+};
 
 struct mdev_device {
 	struct device dev;
@@ -19,7 +37,13 @@ struct mdev_device {
 	struct mdev_type *type;
 	struct device *iommu_device;
 	struct mutex creation_lock;
+	struct mdev_irq mdev_irq;
 };
+
+static inline struct mdev_device *irq_to_mdev(struct mdev_irq *mdev_irq)
+{
+	return container_of(mdev_irq, struct mdev_device, mdev_irq);
+}
 
 static inline struct mdev_device *to_mdev_device(struct device *dev)
 {
@@ -98,5 +122,32 @@ static inline struct mdev_device *mdev_from_dev(struct device *dev)
 {
 	return dev->bus == &mdev_bus_type ? to_mdev_device(dev) : NULL;
 }
+
+#if IS_ENABLED(CONFIG_VFIO_MDEV_IRQS)
+int mdev_set_msix_trigger(struct mdev_device *mdev, unsigned int index,
+			  unsigned int start, unsigned int count, u32 flags,
+			  void *data);
+void mdev_msix_send_signal(struct mdev_device *mdev, int vector);
+int mdev_irqs_init(struct mdev_device *mdev, int num, bool *ims_map);
+void mdev_irqs_free(struct mdev_device *mdev);
+void mdev_irqs_set_pasid(struct mdev_device *mdev, u32 pasid);
+#else
+static inline int mdev_set_msix_trigger(struct mdev_device *mdev, unsigned int index,
+					unsigned int start, unsigned int count, u32 flags,
+					void *data)
+{
+	return -EOPNOTSUPP;
+}
+
+void mdev_msix_send_signal(struct mdev_device *mdev, int vector) {}
+
+static inline int mdev_irqs_init(struct mdev_device *mdev, int num, bool *ims_map)
+{
+	return -EOPNOTSUPP;
+}
+
+void mdev_irqs_free(struct mdev_device *mdev) {}
+void mdev_irqs_set_pasid(struct mdev_device *mdev, u32 pasid) {}
+#endif /* CONFIG_VFIO_MDEV_IMS */
 
 #endif /* MDEV_H */

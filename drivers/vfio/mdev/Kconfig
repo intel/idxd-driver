@@ -9,3 +9,15 @@ config VFIO_MDEV
 	  See Documentation/driver-api/vfio-mediated-device.rst for more details.
 
 	  If you don't know what do here, say N.
+
+config VFIO_MDEV_IRQS
+	bool "Mediated device driver common lib code for interrupts"
+	depends on VFIO_MDEV
+	select IMS_MSI_ARRAY
+	select IRQ_BYPASS_MANAGER
+	default n
+	help
+	  Provide common library code to deal with IMS interrupts for mediated
+	  devices.
+
+	  If you don't know what to do here, say N.
