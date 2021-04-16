@@ -52,6 +52,8 @@ static int idxd_vdcm_get_irq_count(struct vfio_device *vdev, int type)
 {
 	if (type == VFIO_PCI_MSIX_IRQ_INDEX)
 		return VIDXD_MAX_MSIX_VECS;
+	else if (type == VFIO_PCI_REQ_IRQ_INDEX)
+		return 1;
 
 	return 0;
 }
@@ -486,6 +488,12 @@ static int idxd_vdcm_set_irqs(struct vdcm_idxd *vidxd, uint32_t flags,
 			return mdev_set_msix_trigger(mdev, index, start, count, flags, data);
 		}
 		break;
+	case VFIO_PCI_REQ_IRQ_INDEX:
+		switch (flags & VFIO_IRQ_SET_ACTION_TYPE_MASK) {
+		case VFIO_IRQ_SET_ACTION_TRIGGER:
+			return vfio_mdev_set_req_trigger(mdev, index, start, count, flags, data);
+		}
+		break;
 	}
 
 	return -ENOTTY;
@@ -678,6 +686,7 @@ static long idxd_vdcm_ioctl(struct vfio_device *vdev, unsigned int cmd, unsigned
 
 		switch (info.index) {
 		case VFIO_PCI_MSIX_IRQ_INDEX:
+		case VFIO_PCI_REQ_IRQ_INDEX:
 			info.flags |= VFIO_IRQ_INFO_NORESIZE;
 			break;
 		default:
@@ -750,6 +759,7 @@ static const struct vfio_device_ops idxd_mdev_ops = {
 	.write = idxd_vdcm_write,
 	.mmap = idxd_vdcm_mmap,
 	.ioctl = idxd_vdcm_ioctl,
+	.request = vfio_mdev_request,
 };
 
 static ssize_t name_show(struct mdev_type *mtype, struct mdev_type_attribute *attr, char *buf)
