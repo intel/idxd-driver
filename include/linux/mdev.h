@@ -11,6 +11,8 @@
 #define MDEV_H
 
 #include <linux/irqbypass.h>
+#include <linux/eventfd.h>
+#include <linux/vfio.h>
 
 struct mdev_type;
 
@@ -38,6 +40,7 @@ struct mdev_device {
 	struct device *iommu_device;
 	struct mutex creation_lock;
 	struct mdev_irq mdev_irq;
+	struct eventfd_ctx *req_trigger;
 };
 
 static inline struct mdev_device *irq_to_mdev(struct mdev_irq *mdev_irq)
@@ -131,6 +134,10 @@ void mdev_msix_send_signal(struct mdev_device *mdev, int vector);
 int mdev_irqs_init(struct mdev_device *mdev, int num, bool *ims_map);
 void mdev_irqs_free(struct mdev_device *mdev);
 void mdev_irqs_set_pasid(struct mdev_device *mdev, u32 pasid);
+void vfio_mdev_request(struct vfio_device *vdev, unsigned int count);
+int vfio_mdev_set_req_trigger(struct mdev_device *mdev, unsigned int index,
+			      unsigned int start, unsigned int count, u32 flags,
+			      void *data);
 #else
 static inline int mdev_set_msix_trigger(struct mdev_device *mdev, unsigned int index,
 					unsigned int start, unsigned int count, u32 flags,
@@ -148,6 +155,14 @@ static inline int mdev_irqs_init(struct mdev_device *mdev, int num, bool *ims_ma
 
 void mdev_irqs_free(struct mdev_device *mdev) {}
 void mdev_irqs_set_pasid(struct mdev_device *mdev, u32 pasid) {}
+void vfio_mdev_request(struct vfio_device *vdev, unsigned int count) {}
+
+int vfio_mdev_set_req_trigger(struct mdev_device *mdev, unsigned int index,
+			      unsigned int start, unsigned int count, u32 flags,
+			      void *data)
+{
+	return -EOPNOTSUPP;
+}
 #endif /* CONFIG_VFIO_MDEV_IMS */
 
 #endif /* MDEV_H */

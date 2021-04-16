@@ -316,3 +316,26 @@ void mdev_irqs_free(struct mdev_device *mdev)
 	memset(&mdev->mdev_irq, 0, sizeof(mdev->mdev_irq));
 }
 EXPORT_SYMBOL_GPL(mdev_irqs_free);
+
+void vfio_mdev_request(struct vfio_device *vdev, unsigned int count)
+{
+	struct device *dev = vdev->dev;
+	struct mdev_device *mdev = to_mdev_device(dev);
+
+	if (mdev->req_trigger) {
+		dev_dbg(dev, "Requesting device from user\n");
+		eventfd_signal(mdev->req_trigger, 1);
+	}
+}
+EXPORT_SYMBOL_GPL(vfio_mdev_request);
+
+int vfio_mdev_set_req_trigger(struct mdev_device *mdev, unsigned int index,
+			      unsigned int start, unsigned int count, u32 flags,
+			      void *data)
+{
+	if (index != VFIO_PCI_REQ_IRQ_INDEX || start != 0 || count != 1)
+		return -EINVAL;
+
+	return vfio_set_ctx_trigger_single(&mdev->req_trigger, count, flags, data);
+}
+EXPORT_SYMBOL_GPL(vfio_mdev_set_req_trigger);
