@@ -235,4 +235,8 @@ extern int vfio_virqfd_enable(void *opaque,
 			      void *data, struct virqfd **pvirqfd, int fd);
 extern void vfio_virqfd_disable(struct virqfd **pvirqfd);
 
+/* common lib functions */
+extern int vfio_set_ctx_trigger_single(struct eventfd_ctx **ctx,
+				       unsigned int count, u32 flags,
+				       void *data);
 #endif /* VFIO_H */
