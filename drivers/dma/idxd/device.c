@@ -1282,3 +1282,38 @@ int idxd_device_drv_probe(struct device *dev)
 	dev_info(dev, "Device %s enabled\n", dev_name(dev));
 	return 0;
 }
+
+void idxd_device_drv_remove(struct device *dev)
+{
+	struct idxd_device *idxd = confdev_to_idxd(dev);
+	int i, rc;
+
+	for (i = 0; i < idxd->max_wqs; i++) {
+		struct idxd_wq *wq = idxd->wqs[i];
+
+		if (wq->state == IDXD_WQ_DISABLED)
+			continue;
+		dev_warn(dev, "Active wq %d on disable %s.\n", i, dev_name(wq_confdev(wq)));
+		device_release_driver(wq_confdev(wq));
+	}
+
+	idxd_unregister_dma_device(idxd);
+	rc = idxd_device_disable(idxd);
+	if (test_bit(IDXD_FLAG_CONFIGURABLE, &idxd->flags)) {
+		for (i = 0; i < idxd->max_wqs; i++) {
+			struct idxd_wq *wq = idxd->wqs[i];
+			unsigned long flags;
+
+			mutex_lock(&wq->wq_lock);
+			spin_lock_irqsave(&idxd->dev_lock, flags);
+			idxd_wq_disable_cleanup(wq);
+			spin_unlock_irqrestore(&idxd->dev_lock, flags);
+			mutex_unlock(&wq->wq_lock);
+		}
+	}
+
+	if (rc < 0)
+		dev_warn(dev, "Device disable failed\n");
+	else
+		dev_info(dev, "Device %s disabled\n", dev_name(dev));
+}
