@@ -1247,3 +1247,38 @@ void drv_disable_wq(struct idxd_wq *wq)
 	__drv_disable_wq(wq);
 	mutex_unlock(&wq->wq_lock);
 }
+
+int idxd_device_drv_probe(struct device *dev)
+{
+	struct idxd_device *idxd = confdev_to_idxd(dev);
+	unsigned long flags;
+	int rc;
+
+	/* Device configuration */
+	spin_lock_irqsave(&idxd->dev_lock, flags);
+	if (test_bit(IDXD_FLAG_CONFIGURABLE, &idxd->flags))
+		rc = idxd_device_config(idxd);
+	spin_unlock_irqrestore(&idxd->dev_lock, flags);
+	if (rc < 0) {
+		dev_dbg(dev, "Device config failed: %d\n", rc);
+		return rc;
+	}
+
+	/* Start device */
+	rc = idxd_device_enable(idxd);
+	if (rc < 0) {
+		dev_warn(dev, "Device enable failed: %d\n", rc);
+		return rc;
+	}
+
+	/* Setup DMA device without channels */
+	rc = idxd_register_dma_device(idxd);
+	if (rc < 0) {
+		dev_dbg(dev, "Failed to register dmaengine device\n");
+		idxd_device_disable(idxd);
+		return rc;
+	}
+
+	dev_info(dev, "Device %s enabled\n", dev_name(dev));
+	return 0;
+}
