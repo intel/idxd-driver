@@ -57,6 +57,7 @@ struct idxd_device_driver {
 };
 
 static const char idxd_dsa_drv_name[] = "dsa";
+static const char idxd_dev_drv_name[] = "idxd";
 
 struct idxd_irq_entry {
 	struct idxd_device *idxd;
@@ -369,6 +370,8 @@ static inline void idxd_dev_set_type(struct idxd_dev *idev, enum idxd_dev_type t
 
 extern struct bus_type dsa_bus_type;
 
+extern struct idxd_device_driver idxd_drv;
+
 extern bool support_enqcmd;
 extern struct ida idxd_ida;
 extern struct device_type dsa_device_type;
@@ -379,12 +382,16 @@ extern struct device_type idxd_group_device_type;
 
 static inline bool is_dsa_dev(struct device *dev)
 {
-	return dev->type == &dsa_device_type;
+	struct idxd_dev *idev = confdev_to_idxd_dev(dev);
+
+	return idev->type == IDXD_DEV_DSA;
 }
 
 static inline bool is_iax_dev(struct device *dev)
 {
-	return dev->type == &iax_device_type;
+	struct idxd_dev *idev = confdev_to_idxd_dev(dev);
+
+	return idev->type == IDXD_DEV_IAX;
 }
 
 static inline bool is_idxd_dev(struct device *dev)
@@ -492,6 +499,8 @@ void idxd_mask_msix_vector(struct idxd_device *idxd, int vec_id);
 void idxd_unmask_msix_vector(struct idxd_device *idxd, int vec_id);
 
 /* device control */
+int idxd_register_idxd_drv(void);
+void idxd_unregister_idxd_drv(void);
 int idxd_device_drv_probe(struct device *dev);
 void idxd_device_drv_remove(struct device *dev);
 int drv_enable_wq(struct idxd_wq *wq);

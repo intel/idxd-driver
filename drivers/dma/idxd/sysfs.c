@@ -16,10 +16,15 @@ static char *idxd_wq_type_names[] = {
 	[IDXD_WQT_USER]		= "user",
 };
 
+static bool is_idxd_dev_drv(struct device_driver *drv)
+{
+	return strncmp(drv->name, idxd_dev_drv_name, strlen(idxd_dev_drv_name)) == 0;
+}
+
 static int idxd_config_bus_match(struct device *dev,
 				 struct device_driver *drv)
 {
-	return (is_idxd_dev(dev) || is_idxd_wq_dev(dev));
+	return (is_idxd_dev(dev) && is_idxd_dev_drv(drv));
 }
 
 static int idxd_config_bus_probe(struct device *dev)

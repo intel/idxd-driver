@@ -1317,3 +1317,19 @@ void idxd_device_drv_remove(struct device *dev)
 	else
 		dev_info(dev, "Device %s disabled\n", dev_name(dev));
 }
+
+struct idxd_device_driver idxd_drv = {
+	.probe = idxd_device_drv_probe,
+	.remove = idxd_device_drv_remove,
+	.name = idxd_dev_drv_name,
+};
+
+int idxd_register_idxd_drv(void)
+{
+	return idxd_driver_register(&idxd_drv);
+}
+
+void idxd_unregister_idxd_drv(void)
+{
+	idxd_driver_unregister(&idxd_drv);
+}

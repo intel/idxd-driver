@@ -705,15 +705,11 @@ static void idxd_release_int_handles(struct idxd_device *idxd)
 static void idxd_shutdown(struct pci_dev *pdev)
 {
 	struct idxd_device *idxd = pci_get_drvdata(pdev);
-	int rc, i;
+	int i;
 	struct idxd_irq_entry *irq_entry;
 	int msixcnt = pci_msix_vec_count(pdev);
 
-	rc = idxd_device_disable(idxd);
-	if (rc)
-		dev_err(&pdev->dev, "Disabling device failed\n");
-
-	dev_dbg(&pdev->dev, "%s called\n", __func__);
+	device_release_driver(idxd_confdev(idxd));
 	idxd_mask_msix_vectors(idxd);
 	idxd_mask_error_interrupts(idxd);
 
@@ -780,9 +776,13 @@ static int __init idxd_init_module(void)
 	if (err < 0)
 		return err;
 
-	err = idxd_register_driver();
+	err = idxd_register_idxd_drv();
 	if (err < 0)
 		goto err_idxd_driver_register;
+
+	err = idxd_register_driver();
+	if (err < 0)
+		goto err_driver_register;
 
 	err = idxd_cdev_register();
 	if (err)
@@ -798,6 +798,8 @@ err_pci_register:
 	idxd_cdev_remove();
 err_cdev_register:
 	idxd_unregister_driver();
+err_driver_register:
+	idxd_unregister_idxd_drv();
 err_idxd_driver_register:
 	idxd_unregister_bus_type();
 	return err;
@@ -806,6 +808,7 @@ module_init(idxd_init_module);
 
 static void __exit idxd_exit_module(void)
 {
+	idxd_unregister_idxd_drv();
 	idxd_unregister_driver();
 	pci_unregister_driver(&idxd_pci_driver);
 	idxd_cdev_remove();
