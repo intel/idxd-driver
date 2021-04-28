@@ -54,6 +54,8 @@ struct idxd_device_driver {
 	struct device_driver drv;
 };
 
+static const char idxd_dsa_drv_name[] = "dsa";
+
 struct idxd_irq_entry {
 	struct idxd_device *idxd;
 	int id;
