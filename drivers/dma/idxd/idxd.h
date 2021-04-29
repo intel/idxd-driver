@@ -373,6 +373,8 @@ static inline void idxd_dev_set_type(struct idxd_dev *idev, enum idxd_dev_type t
 extern struct bus_type dsa_bus_type;
 
 extern struct idxd_device_driver idxd_drv;
+extern struct idxd_device_driver idxd_dmaengine_drv;
+extern struct idxd_device_driver idxd_user_drv;
 
 extern bool support_enqcmd;
 extern struct ida idxd_ida;

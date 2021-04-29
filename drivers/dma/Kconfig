@@ -290,6 +290,16 @@ config INTEL_IDXD
 
 	  If unsure, say N.
 
+config INTEL_IDXD_COMPAT
+	bool "Compat driver for dsa_drv sub driver behavior"
+	depends on INTEL_IDXD
+	help
+	  Compat driver to support old /sys/bus/dsa/drivers/dsa behavior.
+
+	  Say Y if you have old applications that require such behavior.
+
+	  If unsure, say N.
+
 # Config symbol that collects all the dependencies that's necessary to
 # support shared virtual memory for the devices supported by idxd.
 config INTEL_IDXD_SVM

@@ -5,6 +5,7 @@
 #include <linux/module.h>
 #include <linux/pci.h>
 #include <linux/device.h>
+#include <linux/device/bus.h>
 #include <linux/io-64-nonatomic-lo-hi.h>
 #include <uapi/linux/idxd.h>
 #include "registers.h"
@@ -59,50 +60,105 @@ struct bus_type dsa_bus_type = {
 	.remove = idxd_config_bus_remove,
 };
 
-static int idxd_dsa_drv_probe(struct device *dev)
-{
-	if (is_idxd_dev(dev))
-		return idxd_device_drv_probe(dev);
+#define DRIVER_ATTR_IGNORE_LOCKDEP(_name, _mode, _show, _store) \
+	struct driver_attribute driver_attr_##_name =		\
+	__ATTR_IGNORE_LOCKDEP(_name, _mode, _show, _store)
 
-	if (is_idxd_wq_dev(dev)) {
+static ssize_t unbind_store(struct device_driver *drv, const char *buf, size_t count)
+{
+	struct bus_type *bus = drv->bus;
+	struct device *dev;
+	int rc = -ENODEV;
+
+	dev = bus_find_device_by_name(bus, NULL, buf);
+	if (dev && dev->driver) {
+		device_driver_detach(dev);
+		rc = count;
+	}
+	return rc;
+}
+static DRIVER_ATTR_IGNORE_LOCKDEP(unbind, 0200, NULL, unbind_store);
+
+static ssize_t bind_store(struct device_driver *drv, const char *buf, size_t count)
+{
+	struct bus_type *bus = drv->bus;
+	struct device *dev;
+	struct device_driver *alt_drv = NULL;
+	int rc = -ENODEV;
+
+	dev = bus_find_device_by_name(bus, NULL, buf);
+	if (!dev || dev->driver || drv != &dsa_drv.drv)
+		return -ENODEV;
+
+	if (is_idxd_dev(dev)) {
+		alt_drv = &idxd_drv.drv;
+	} else if (is_idxd_wq_dev(dev)) {
 		struct idxd_wq *wq = confdev_to_wq(dev);
 
-		return drv_enable_wq(wq);
+		if (is_idxd_wq_kernel(wq))
+			alt_drv = &idxd_dmaengine_drv.drv;
+		else if (is_idxd_wq_user(wq))
+			alt_drv = &idxd_user_drv.drv;
 	}
 
+	if (!alt_drv)
+		return -ENODEV;
+
+	rc = device_driver_attach(alt_drv, dev);
+	if (rc < 0)
+		return rc;
+
+	return count;
+}
+static DRIVER_ATTR_IGNORE_LOCKDEP(bind, 0200, NULL, bind_store);
+
+
+static struct attribute *dsa_drv_compat_attrs[] = {
+	&driver_attr_bind.attr,
+	&driver_attr_unbind.attr,
+	NULL,
+};
+
+static const struct attribute_group dsa_drv_compat_attr_group = {
+	.attrs = dsa_drv_compat_attrs,
+};
+
+static const struct attribute_group *dsa_drv_compat_groups[] = {
+	&dsa_drv_compat_attr_group,
+	NULL,
+};
+
+static int idxd_dsa_drv_probe(struct device *dev)
+{
 	return -ENODEV;
 }
 
 static void idxd_dsa_drv_remove(struct device *dev)
 {
-	if (is_idxd_dev(dev)) {
-		idxd_device_drv_remove(dev);
-		return;
-	}
-
-	if (is_idxd_wq_dev(dev)) {
-		struct idxd_wq *wq = confdev_to_wq(dev);
-
-		drv_disable_wq(wq);
-		return;
-	}
 }
 
 static struct idxd_device_driver dsa_drv = {
 	.name = idxd_dsa_drv_name,
 	.probe = idxd_dsa_drv_probe,
 	.remove = idxd_dsa_drv_remove,
+	.drv = {
+		.suppress_bind_attrs = true,
+		.groups = dsa_drv_compat_groups,
+	},
 };
 
 /* IDXD generic driver setup */
 int idxd_register_driver(void)
 {
-	return idxd_driver_register(&dsa_drv);
+	if (IS_ENABLED(CONFIG_INTEL_IDXD_COMPAT))
+		return idxd_driver_register(&dsa_drv);
+	return 0;
 }
 
 void idxd_unregister_driver(void)
 {
-	idxd_driver_unregister(&dsa_drv);
+	if (IS_ENABLED(CONFIG_INTEL_IDXD_COMPAT))
+		idxd_driver_unregister(&dsa_drv);
 }
 
 /* IDXD engine attributes */
