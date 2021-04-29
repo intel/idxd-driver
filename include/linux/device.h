@@ -852,6 +852,9 @@ int __must_check device_reprobe(struct device *dev);
 
 bool device_is_bound(struct device *dev);
 
+int __must_check device_driver_attach(struct device_driver *drv, struct device *dev);
+void device_driver_detach(struct device *dev);
+
 /*
  * Easy functions for dynamically creating devices on the fly
  */

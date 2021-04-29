@@ -1023,6 +1023,7 @@ int device_driver_attach(struct device_driver *drv, struct device *dev)
 
 	return ret;
 }
+EXPORT_SYMBOL_GPL(device_driver_attach);
 
 static void __driver_attach_async_helper(void *_dev, async_cookie_t cookie)
 {
@@ -1227,6 +1228,7 @@ void device_driver_detach(struct device *dev)
 {
 	device_release_driver_internal(dev, NULL, dev->parent);
 }
+EXPORT_SYMBOL_GPL(device_driver_detach);
 
 /**
  * driver_detach - detach driver from all devices it controls.
