@@ -117,7 +117,7 @@ static int zpci_pfip_cap(struct zpci_dev *zdev, struct vfio_info_cap *caps)
 int vfio_pci_info_zdev_add_caps(struct vfio_pci_device *vdev,
 				struct vfio_info_cap *caps)
 {
-	struct zpci_dev *zdev = to_zpci(vdev->pdev);
+	struct zpci_dev *zdev = to_zpci(to_pci_dev(vdev->vdev.dev));
 	int ret;
 
 	if (!zdev)

@@ -36,7 +36,7 @@ struct vfio_fsl_mc_region {
 };
 
 struct vfio_fsl_mc_device {
-	struct fsl_mc_device		*mc_dev;
+	struct vfio_device		vdev;
 	struct notifier_block        nb;
 	int				refcnt;
 	struct vfio_fsl_mc_region	*regions;

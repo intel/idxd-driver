@@ -100,7 +100,7 @@ struct vfio_pci_mmap_vma {
 };
 
 struct vfio_pci_device {
-	struct pci_dev		*pdev;
+	struct vfio_device	vdev;
 	void __iomem		*barmap[PCI_STD_NUM_BARS];
 	bool			bar_mmap_supported[PCI_STD_NUM_BARS];
 	u8			*pci_config_map;

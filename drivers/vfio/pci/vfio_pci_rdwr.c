@@ -202,7 +202,7 @@ static ssize_t do_io_rw(struct vfio_pci_device *vdev, bool test_mem,
 
 static int vfio_pci_setup_barmap(struct vfio_pci_device *vdev, int bar)
 {
-	struct pci_dev *pdev = vdev->pdev;
+	struct pci_dev *pdev = to_pci_dev(vdev->vdev.dev);
 	int ret;
 	void __iomem *io;
 
@@ -227,13 +227,13 @@ static int vfio_pci_setup_barmap(struct vfio_pci_device *vdev, int bar)
 ssize_t vfio_pci_bar_rw(struct vfio_pci_device *vdev, char __user *buf,
 			size_t count, loff_t *ppos, bool iswrite)
 {
-	struct pci_dev *pdev = vdev->pdev;
+	struct pci_dev *pdev = to_pci_dev(vdev->vdev.dev);
 	loff_t pos = *ppos & VFIO_PCI_OFFSET_MASK;
 	int bar = VFIO_PCI_OFFSET_TO_INDEX(*ppos);
 	size_t x_start = 0, x_end = 0;
 	resource_size_t end;
 	void __iomem *io;
-	struct resource *res = &vdev->pdev->resource[bar];
+	struct resource *res = &pdev->resource[bar];
 	ssize_t done;
 
 	if (pci_resource_start(pdev, bar))
@@ -291,6 +291,7 @@ out:
 ssize_t vfio_pci_vga_rw(struct vfio_pci_device *vdev, char __user *buf,
 			       size_t count, loff_t *ppos, bool iswrite)
 {
+	struct pci_dev *pdev = to_pci_dev(vdev->vdev.dev);
 	int ret;
 	loff_t off, pos = *ppos & VFIO_PCI_OFFSET_MASK;
 	void __iomem *iomem = NULL;
@@ -333,7 +334,7 @@ ssize_t vfio_pci_vga_rw(struct vfio_pci_device *vdev, char __user *buf,
 	if (!iomem)
 		return -ENOMEM;
 
-	ret = vga_get_interruptible(vdev->pdev, rsrc);
+	ret = vga_get_interruptible(pdev, rsrc);
 	if (ret) {
 		is_ioport ? ioport_unmap(iomem) : iounmap(iomem);
 		return ret;
@@ -346,7 +347,7 @@ ssize_t vfio_pci_vga_rw(struct vfio_pci_device *vdev, char __user *buf,
 	 */
 	done = do_io_rw(vdev, false, iomem, buf, off, count, 0, 0, iswrite);
 
-	vga_put(vdev->pdev, rsrc);
+	vga_put(pdev, rsrc);
 
 	is_ioport ? ioport_unmap(iomem) : iounmap(iomem);
 
@@ -413,7 +414,7 @@ static void vfio_pci_ioeventfd_thread(void *opaque, void *unused)
 long vfio_pci_ioeventfd(struct vfio_pci_device *vdev, loff_t offset,
 			uint64_t data, int count, int fd)
 {
-	struct pci_dev *pdev = vdev->pdev;
+	struct pci_dev *pdev = to_pci_dev(vdev->vdev.dev);
 	loff_t pos = offset & VFIO_PCI_OFFSET_MASK;
 	int ret, bar = VFIO_PCI_OFFSET_TO_INDEX(offset);
 	struct vfio_pci_ioeventfd *ioeventfd;
@@ -480,7 +481,7 @@ long vfio_pci_ioeventfd(struct vfio_pci_device *vdev, loff_t offset,
 	ioeventfd->pos = pos;
 	ioeventfd->bar = bar;
 	ioeventfd->count = count;
-	ioeventfd->test_mem = vdev->pdev->resource[bar].flags & IORESOURCE_MEM;
+	ioeventfd->test_mem = pdev->resource[bar].flags & IORESOURCE_MEM;
 
 	ret = vfio_virqfd_enable(ioeventfd, vfio_pci_ioeventfd_handler,
 				 vfio_pci_ioeventfd_thread, NULL,

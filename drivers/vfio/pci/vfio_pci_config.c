@@ -183,7 +183,7 @@ static int vfio_default_config_read(struct vfio_pci_device *vdev, int pos,
 
 	/* Any non-virtualized bits? */
 	if (cpu_to_le32(~0U >> (32 - (count * 8))) != virt) {
-		struct pci_dev *pdev = vdev->pdev;
+		struct pci_dev *pdev = to_pci_dev(vdev->vdev.dev);
 		__le32 phys_val = 0;
 		int ret;
 
@@ -224,7 +224,7 @@ static int vfio_default_config_write(struct vfio_pci_device *vdev, int pos,
 
 	/* Non-virtualzed and writable bits go to hardware */
 	if (write & ~virt) {
-		struct pci_dev *pdev = vdev->pdev;
+		struct pci_dev *pdev = to_pci_dev(vdev->vdev.dev);
 		__le32 phys_val = 0;
 		int ret;
 
@@ -248,9 +248,10 @@ static int vfio_direct_config_read(struct vfio_pci_device *vdev, int pos,
 				   int count, struct perm_bits *perm,
 				   int offset, __le32 *val)
 {
+	struct pci_dev *pdev = to_pci_dev(vdev->vdev.dev);
 	int ret;
 
-	ret = vfio_user_config_read(vdev->pdev, pos, val, count);
+	ret = vfio_user_config_read(pdev, pos, val, count);
 	if (ret)
 		return ret;
 
@@ -273,9 +274,10 @@ static int vfio_raw_config_write(struct vfio_pci_device *vdev, int pos,
 				 int count, struct perm_bits *perm,
 				 int offset, __le32 val)
 {
+	struct pci_dev *pdev = to_pci_dev(vdev->vdev.dev);
 	int ret;
 
-	ret = vfio_user_config_write(vdev->pdev, pos, val, count);
+	ret = vfio_user_config_write(pdev, pos, val, count);
 	if (ret)
 		return ret;
 
@@ -286,9 +288,10 @@ static int vfio_raw_config_read(struct vfio_pci_device *vdev, int pos,
 				int count, struct perm_bits *perm,
 				int offset, __le32 *val)
 {
+	struct pci_dev *pdev = to_pci_dev(vdev->vdev.dev);
 	int ret;
 
-	ret = vfio_user_config_read(vdev->pdev, pos, val, count);
+	ret = vfio_user_config_read(pdev, pos, val, count);
 	if (ret)
 		return ret;
 
@@ -398,7 +401,7 @@ static inline void p_setd(struct perm_bits *p, int off, u32 virt, u32 write)
 /* Caller should hold memory_lock semaphore */
 bool __vfio_pci_memory_enabled(struct vfio_pci_device *vdev)
 {
-	struct pci_dev *pdev = vdev->pdev;
+	struct pci_dev *pdev = to_pci_dev(vdev->vdev.dev);
 	u16 cmd = le16_to_cpu(*(__le16 *)&vdev->vconfig[PCI_COMMAND]);
 
 	/*
@@ -415,7 +418,7 @@ bool __vfio_pci_memory_enabled(struct vfio_pci_device *vdev)
  */
 static void vfio_bar_restore(struct vfio_pci_device *vdev)
 {
-	struct pci_dev *pdev = vdev->pdev;
+	struct pci_dev *pdev = to_pci_dev(vdev->vdev.dev);
 	u32 *rbar = vdev->rbar;
 	u16 cmd;
 	int i;
@@ -462,7 +465,7 @@ static __le32 vfio_generate_bar_flags(struct pci_dev *pdev, int bar)
  */
 static void vfio_bar_fixup(struct vfio_pci_device *vdev)
 {
-	struct pci_dev *pdev = vdev->pdev;
+	struct pci_dev *pdev = to_pci_dev(vdev->vdev.dev);
 	int i;
 	__le32 *vbar;
 	u64 mask;
@@ -518,13 +521,14 @@ static int vfio_basic_config_read(struct vfio_pci_device *vdev, int pos,
 				  int count, struct perm_bits *perm,
 				  int offset, __le32 *val)
 {
+	struct pci_dev *pdev = to_pci_dev(vdev->vdev.dev);
 	if (is_bar(offset)) /* pos == offset for basic config */
 		vfio_bar_fixup(vdev);
 
 	count = vfio_default_config_read(vdev, pos, count, perm, offset, val);
 
 	/* Mask in virtual memory enable */
-	if (offset == PCI_COMMAND && vdev->pdev->no_command_memory) {
+	if (offset == PCI_COMMAND && pdev->no_command_memory) {
 		u16 cmd = le16_to_cpu(*(__le16 *)&vdev->vconfig[PCI_COMMAND]);
 		u32 tmp_val = le32_to_cpu(*val);
 
@@ -538,12 +542,13 @@ static int vfio_basic_config_read(struct vfio_pci_device *vdev, int pos,
 /* Test whether BARs match the value we think they should contain */
 static bool vfio_need_bar_restore(struct vfio_pci_device *vdev)
 {
+	struct pci_dev *pdev = to_pci_dev(vdev->vdev.dev);
 	int i = 0, pos = PCI_BASE_ADDRESS_0, ret;
 	u32 bar;
 
 	for (; pos <= PCI_BASE_ADDRESS_5; i++, pos += 4) {
 		if (vdev->rbar[i]) {
-			ret = pci_user_read_config_dword(vdev->pdev, pos, &bar);
+			ret = pci_user_read_config_dword(pdev, pos, &bar);
 			if (ret || vdev->rbar[i] != bar)
 				return true;
 		}
@@ -556,7 +561,7 @@ static int vfio_basic_config_write(struct vfio_pci_device *vdev, int pos,
 				   int count, struct perm_bits *perm,
 				   int offset, __le32 val)
 {
-	struct pci_dev *pdev = vdev->pdev;
+	struct pci_dev *pdev = to_pci_dev(vdev->vdev.dev);
 	__le16 *virt_cmd;
 	u16 new_cmd = 0;
 	int ret;
@@ -751,7 +756,7 @@ static int vfio_vpd_config_write(struct vfio_pci_device *vdev, int pos,
 				 int count, struct perm_bits *perm,
 				 int offset, __le32 val)
 {
-	struct pci_dev *pdev = vdev->pdev;
+	struct pci_dev *pdev = to_pci_dev(vdev->vdev.dev);
 	__le16 *paddr = (__le16 *)(vdev->vconfig + pos - offset + PCI_VPD_ADDR);
 	__le32 *pdata = (__le32 *)(vdev->vconfig + pos - offset + PCI_VPD_DATA);
 	u16 addr;
@@ -833,6 +838,7 @@ static int vfio_exp_config_write(struct vfio_pci_device *vdev, int pos,
 				 int count, struct perm_bits *perm,
 				 int offset, __le32 val)
 {
+	struct pci_dev *pdev = to_pci_dev(vdev->vdev.dev);
 	__le16 *ctrl = (__le16 *)(vdev->vconfig + pos -
 				  offset + PCI_EXP_DEVCTL);
 	int readrq = le16_to_cpu(*ctrl) & PCI_EXP_DEVCTL_READRQ;
@@ -853,13 +859,13 @@ static int vfio_exp_config_write(struct vfio_pci_device *vdev, int pos,
 
 		*ctrl &= ~cpu_to_le16(PCI_EXP_DEVCTL_BCR_FLR);
 
-		ret = pci_user_read_config_dword(vdev->pdev,
+		ret = pci_user_read_config_dword(pdev,
 						 pos - offset + PCI_EXP_DEVCAP,
 						 &cap);
 
 		if (!ret && (cap & PCI_EXP_DEVCAP_FLR)) {
 			vfio_pci_zap_and_down_write_memory_lock(vdev);
-			pci_try_reset_function(vdev->pdev);
+			pci_try_reset_function(pdev);
 			up_write(&vdev->memory_lock);
 		}
 	}
@@ -880,9 +886,9 @@ static int vfio_exp_config_write(struct vfio_pci_device *vdev, int pos,
 	if (readrq != (le16_to_cpu(*ctrl) & PCI_EXP_DEVCTL_READRQ)) {
 		readrq = 128 <<
 			((le16_to_cpu(*ctrl) & PCI_EXP_DEVCTL_READRQ) >> 12);
-		readrq = max(readrq, pcie_get_mps(vdev->pdev));
+		readrq = max(readrq, pcie_get_mps(pdev));
 
-		pcie_set_readrq(vdev->pdev, readrq);
+		pcie_set_readrq(pdev, readrq);
 	}
 
 	return count;
@@ -917,6 +923,7 @@ static int vfio_af_config_write(struct vfio_pci_device *vdev, int pos,
 				int count, struct perm_bits *perm,
 				int offset, __le32 val)
 {
+	struct pci_dev *pdev = to_pci_dev(vdev->vdev.dev);
 	u8 *ctrl = vdev->vconfig + pos - offset + PCI_AF_CTRL;
 
 	count = vfio_default_config_write(vdev, pos, count, perm, offset, val);
@@ -935,13 +942,13 @@ static int vfio_af_config_write(struct vfio_pci_device *vdev, int pos,
 
 		*ctrl &= ~PCI_AF_CTRL_FLR;
 
-		ret = pci_user_read_config_byte(vdev->pdev,
+		ret = pci_user_read_config_byte(pdev,
 						pos - offset + PCI_AF_CAP,
 						&cap);
 
 		if (!ret && (cap & PCI_AF_CAP_FLR) && (cap & PCI_AF_CAP_TP)) {
 			vfio_pci_zap_and_down_write_memory_lock(vdev);
-			pci_try_reset_function(vdev->pdev);
+			pci_try_reset_function(pdev);
 			up_write(&vdev->memory_lock);
 		}
 	}
@@ -1113,6 +1120,8 @@ static int vfio_msi_config_write(struct vfio_pci_device *vdev, int pos,
 				 int count, struct perm_bits *perm,
 				 int offset, __le32 val)
 {
+	struct pci_dev *pdev = to_pci_dev(vdev->vdev.dev);
+
 	count = vfio_default_config_write(vdev, pos, count, perm, offset, val);
 	if (count < 0)
 		return count;
@@ -1141,7 +1150,7 @@ static int vfio_msi_config_write(struct vfio_pci_device *vdev, int pos,
 
 		/* Write back to virt and to hardware */
 		*pflags = cpu_to_le16(flags);
-		ret = pci_user_write_config_word(vdev->pdev,
+		ret = pci_user_write_config_word(pdev,
 						 start + PCI_MSI_FLAGS,
 						 flags);
 		if (ret)
@@ -1191,7 +1200,7 @@ static int init_pci_cap_msi_perm(struct perm_bits *perm, int len, u16 flags)
 /* Determine MSI CAP field length; initialize msi_perms on 1st call per vdev */
 static int vfio_msi_cap_len(struct vfio_pci_device *vdev, u8 pos)
 {
-	struct pci_dev *pdev = vdev->pdev;
+	struct pci_dev *pdev = to_pci_dev(vdev->vdev.dev);
 	int len, ret;
 	u16 flags;
 
@@ -1224,7 +1233,7 @@ static int vfio_msi_cap_len(struct vfio_pci_device *vdev, u8 pos)
 /* Determine extended capability length for VC (2 & 9) and MFVC */
 static int vfio_vc_cap_len(struct vfio_pci_device *vdev, u16 pos)
 {
-	struct pci_dev *pdev = vdev->pdev;
+	struct pci_dev *pdev = to_pci_dev(vdev->vdev.dev);
 	u32 tmp;
 	int ret, evcc, phases, vc_arb;
 	int len = PCI_CAP_VC_BASE_SIZEOF;
@@ -1265,7 +1274,7 @@ static int vfio_vc_cap_len(struct vfio_pci_device *vdev, u16 pos)
 
 static int vfio_cap_len(struct vfio_pci_device *vdev, u8 cap, u8 pos)
 {
-	struct pci_dev *pdev = vdev->pdev;
+	struct pci_dev *pdev = to_pci_dev(vdev->vdev.dev);
 	u32 dword;
 	u16 word;
 	u8 byte;
@@ -1340,7 +1349,7 @@ static int vfio_cap_len(struct vfio_pci_device *vdev, u8 cap, u8 pos)
 
 static int vfio_ext_cap_len(struct vfio_pci_device *vdev, u16 ecap, u16 epos)
 {
-	struct pci_dev *pdev = vdev->pdev;
+	struct pci_dev *pdev = to_pci_dev(vdev->vdev.dev);
 	u8 byte;
 	u32 dword;
 	int ret;
@@ -1415,7 +1424,7 @@ static int vfio_ext_cap_len(struct vfio_pci_device *vdev, u16 ecap, u16 epos)
 static int vfio_fill_vconfig_bytes(struct vfio_pci_device *vdev,
 				   int offset, int size)
 {
-	struct pci_dev *pdev = vdev->pdev;
+	struct pci_dev *pdev = to_pci_dev(vdev->vdev.dev);
 	int ret = 0;
 
 	/*
@@ -1461,7 +1470,7 @@ static int vfio_fill_vconfig_bytes(struct vfio_pci_device *vdev,
 
 static int vfio_cap_init(struct vfio_pci_device *vdev)
 {
-	struct pci_dev *pdev = vdev->pdev;
+	struct pci_dev *pdev = to_pci_dev(vdev->vdev.dev);
 	u8 *map = vdev->pci_config_map;
 	u16 status;
 	u8 pos, *prev, cap;
@@ -1551,7 +1560,7 @@ static int vfio_cap_init(struct vfio_pci_device *vdev)
 
 static int vfio_ecap_init(struct vfio_pci_device *vdev)
 {
-	struct pci_dev *pdev = vdev->pdev;
+	struct pci_dev *pdev = to_pci_dev(vdev->vdev.dev);
 	u8 *map = vdev->pci_config_map;
 	u16 epos;
 	__le32 *prev = NULL;
@@ -1671,7 +1680,7 @@ static const struct pci_device_id known_bogus_vf_intx_pin[] = {
  */
 int vfio_config_init(struct vfio_pci_device *vdev)
 {
-	struct pci_dev *pdev = vdev->pdev;
+	struct pci_dev *pdev = to_pci_dev(vdev->vdev.dev);
 	u8 *map, *vconfig;
 	int ret;
 
@@ -1805,7 +1814,7 @@ static size_t vfio_pci_cap_remaining_dword(struct vfio_pci_device *vdev,
 static ssize_t vfio_config_do_rw(struct vfio_pci_device *vdev, char __user *buf,
 				 size_t count, loff_t *ppos, bool iswrite)
 {
-	struct pci_dev *pdev = vdev->pdev;
+	struct pci_dev *pdev = to_pci_dev(vdev->vdev.dev);
 	struct perm_bits *perm;
 	__le32 val = 0;
 	int cap_start = 0, offset;

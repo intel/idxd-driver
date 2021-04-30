@@ -15,7 +15,7 @@
 
 static int vfio_fsl_mc_irqs_allocate(struct vfio_fsl_mc_device *vdev)
 {
-	struct fsl_mc_device *mc_dev = vdev->mc_dev;
+	struct fsl_mc_device *mc_dev = to_fsl_mc_device(vdev->vdev.dev);
 	struct vfio_fsl_mc_irq *mc_irq;
 	int irq_count;
 	int ret, i;
@@ -62,12 +62,13 @@ static irqreturn_t vfio_fsl_mc_irq_handler(int irq_num, void *arg)
 static int vfio_set_trigger(struct vfio_fsl_mc_device *vdev,
 						   int index, int fd)
 {
+	struct fsl_mc_device *mc_dev = to_fsl_mc_device(vdev->vdev.dev);
 	struct vfio_fsl_mc_irq *irq = &vdev->mc_irqs[index];
 	struct eventfd_ctx *trigger;
 	int hwirq;
 	int ret;
 
-	hwirq = vdev->mc_dev->irqs[index]->msi_desc->irq;
+	hwirq = mc_dev->irqs[index]->msi_desc->irq;
 	if (irq->trigger) {
 		free_irq(hwirq, irq);
 		kfree(irq->name);
@@ -79,7 +80,7 @@ static int vfio_set_trigger(struct vfio_fsl_mc_device *vdev,
 		return 0;
 
 	irq->name = kasprintf(GFP_KERNEL, "vfio-irq[%d](%s)",
-			    hwirq, dev_name(&vdev->mc_dev->dev));
+			    hwirq, dev_name(vdev->vdev.dev));
 	if (!irq->name)
 		return -ENOMEM;
 
@@ -108,7 +109,7 @@ static int vfio_fsl_mc_set_irq_trigger(struct vfio_fsl_mc_device *vdev,
 				       unsigned int count, u32 flags,
 				       void *data)
 {
-	struct fsl_mc_device *mc_dev = vdev->mc_dev;
+	struct fsl_mc_device *mc_dev = to_fsl_mc_device(vdev->vdev.dev);
 	int ret, hwirq;
 	struct vfio_fsl_mc_irq *irq;
 	struct device *cont_dev = fsl_mc_cont_dev(&mc_dev->dev);
@@ -137,7 +138,7 @@ static int vfio_fsl_mc_set_irq_trigger(struct vfio_fsl_mc_device *vdev,
 		return vfio_set_trigger(vdev, index, fd);
 	}
 
-	hwirq = vdev->mc_dev->irqs[index]->msi_desc->irq;
+	hwirq = mc_dev->irqs[index]->msi_desc->irq;
 
 	irq = &vdev->mc_irqs[index];
 
@@ -174,7 +175,7 @@ int vfio_fsl_mc_set_irqs_ioctl(struct vfio_fsl_mc_device *vdev,
 /* Free All IRQs for the given MC object */
 void vfio_fsl_mc_irqs_cleanup(struct vfio_fsl_mc_device *vdev)
 {
-	struct fsl_mc_device *mc_dev = vdev->mc_dev;
+	struct fsl_mc_device *mc_dev = to_fsl_mc_device(vdev->vdev.dev);
 	int irq_count = mc_dev->obj_desc.irq_count;
 	int i;
 

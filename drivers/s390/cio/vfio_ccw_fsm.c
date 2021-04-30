@@ -242,7 +242,6 @@ static void fsm_io_request(struct vfio_ccw_private *private,
 	union orb *orb;
 	union scsw *scsw = &private->scsw;
 	struct ccw_io_region *io_region = private->io_region;
-	struct mdev_device *mdev = private->mdev;
 	char *errstr = "request";
 	struct subchannel_id schid = get_schid(private);
 
@@ -256,20 +255,19 @@ static void fsm_io_request(struct vfio_ccw_private *private,
 		if (orb->tm.b) {
 			io_region->ret_code = -EOPNOTSUPP;
 			VFIO_CCW_MSG_EVENT(2,
-					   "%pUl (%x.%x.%04x): transport mode\n",
-					   mdev_uuid(mdev), schid.cssid,
-					   schid.ssid, schid.sch_no);
+					   "%s (%x.%x.%04x): transport mode\n",
+					   dev_name(private->vdev.dev),
+					   schid.cssid, schid.ssid,
+					   schid.sch_no);
 			errstr = "transport mode";
 			goto err_out;
 		}
-		io_region->ret_code = cp_init(&private->cp, mdev_dev(mdev),
-					      orb);
+		io_region->ret_code = cp_init(&private->cp, orb);
 		if (io_region->ret_code) {
-			VFIO_CCW_MSG_EVENT(2,
-					   "%pUl (%x.%x.%04x): cp_init=%d\n",
-					   mdev_uuid(mdev), schid.cssid,
-					   schid.ssid, schid.sch_no,
-					   io_region->ret_code);
+			VFIO_CCW_MSG_EVENT(2, "%s (%x.%x.%04x): cp_init=%d\n",
+					   dev_name(private->vdev.dev),
+					   schid.cssid, schid.ssid,
+					   schid.sch_no, io_region->ret_code);
 			errstr = "cp init";
 			goto err_out;
 		}
@@ -277,10 +275,10 @@ static void fsm_io_request(struct vfio_ccw_private *private,
 		io_region->ret_code = cp_prefetch(&private->cp);
 		if (io_region->ret_code) {
 			VFIO_CCW_MSG_EVENT(2,
-					   "%pUl (%x.%x.%04x): cp_prefetch=%d\n",
-					   mdev_uuid(mdev), schid.cssid,
-					   schid.ssid, schid.sch_no,
-					   io_region->ret_code);
+					   "%s (%x.%x.%04x): cp_prefetch=%d\n",
+					   dev_name(private->vdev.dev),
+					   schid.cssid, schid.ssid,
+					   schid.sch_no, io_region->ret_code);
 			errstr = "cp prefetch";
 			cp_free(&private->cp);
 			goto err_out;
@@ -289,28 +287,25 @@ static void fsm_io_request(struct vfio_ccw_private *private,
 		/* Start channel program and wait for I/O interrupt. */
 		io_region->ret_code = fsm_io_helper(private);
 		if (io_region->ret_code) {
-			VFIO_CCW_MSG_EVENT(2,
-					   "%pUl (%x.%x.%04x): fsm_io_helper=%d\n",
-					   mdev_uuid(mdev), schid.cssid,
-					   schid.ssid, schid.sch_no,
-					   io_region->ret_code);
+			VFIO_CCW_MSG_EVENT(
+				2, "%s (%x.%x.%04x): fsm_io_helper=%d\n",
+				dev_name(private->vdev.dev), schid.cssid,
+				schid.ssid, schid.sch_no, io_region->ret_code);
 			errstr = "cp fsm_io_helper";
 			cp_free(&private->cp);
 			goto err_out;
 		}
 		return;
 	} else if (scsw->cmd.fctl & SCSW_FCTL_HALT_FUNC) {
-		VFIO_CCW_MSG_EVENT(2,
-				   "%pUl (%x.%x.%04x): halt on io_region\n",
-				   mdev_uuid(mdev), schid.cssid,
+		VFIO_CCW_MSG_EVENT(2, "%s (%x.%x.%04x): halt on io_region\n",
+				   dev_name(private->vdev.dev), schid.cssid,
 				   schid.ssid, schid.sch_no);
 		/* halt is handled via the async cmd region */
 		io_region->ret_code = -EOPNOTSUPP;
 		goto err_out;
 	} else if (scsw->cmd.fctl & SCSW_FCTL_CLEAR_FUNC) {
-		VFIO_CCW_MSG_EVENT(2,
-				   "%pUl (%x.%x.%04x): clear on io_region\n",
-				   mdev_uuid(mdev), schid.cssid,
+		VFIO_CCW_MSG_EVENT(2, "%s (%x.%x.%04x): clear on io_region\n",
+				   dev_name(private->vdev.dev), schid.cssid,
 				   schid.ssid, schid.sch_no);
 		/* clear is handled via the async cmd region */
 		io_region->ret_code = -EOPNOTSUPP;
