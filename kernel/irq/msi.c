@@ -70,6 +70,30 @@ void get_cached_msi_msg(unsigned int irq, struct msi_msg *msg)
 EXPORT_SYMBOL_GPL(get_cached_msi_msg);
 
 #ifdef CONFIG_GENERIC_MSI_IRQ_DOMAIN
+void msi_domain_set_default_info_flags(struct msi_domain_info *info)
+{
+	/* Required so that a device latches a valid MSI message on startup */
+	info->flags |= MSI_FLAG_ACTIVATE_EARLY;
+
+	/*
+	 * Interrupt reservation mode allows to stear the MSI message of an
+	 * inactive device to a special (usually spurious interrupt) target.
+	 * This allows to prevent interrupt vector exhaustion e.g. on x86.
+	 * But (PCI)MSI interrupts are activated early - see above - so the
+	 * interrupt request/startup sequence would not try to allocate a
+	 * usable vector which means that the device interrupts would end
+	 * up on the special vector and issue spurious interrupt messages.
+	 * Setting the reactivation flag ensures that when the interrupt
+	 * is requested the activation is invoked again so that a real
+	 * vector can be allocated.
+	 */
+	if (IS_ENABLED(CONFIG_GENERIC_IRQ_RESERVATION_MODE))
+		info->flags |= MSI_FLAG_MUST_REACTIVATE;
+
+	/* MSI is oneshot-safe at least in theory */
+	info->chip->flags |= IRQCHIP_ONESHOT_SAFE;
+}
+
 static inline void irq_chip_write_msi_msg(struct irq_data *data,
 					  struct msi_msg *msg)
 {
@@ -410,6 +434,12 @@ int __msi_domain_alloc_irqs(struct irq_domain *domain, struct device *dev,
 	if (ret)
 		return ret;
 
+	if (ops->msi_alloc_store) {
+		ret = ops->msi_alloc_store(domain, dev, nvec);
+		if (ret)
+			return ret;
+	}
+
 	for_each_msi_entry(desc, dev) {
 		ops->set_desc(&arg, desc);
 
@@ -505,6 +535,8 @@ int msi_domain_alloc_irqs(struct irq_domain *domain, struct device *dev,
 
 void __msi_domain_free_irqs(struct irq_domain *domain, struct device *dev)
 {
+	struct msi_domain_info *info = domain->host_data;
+	struct msi_domain_ops *ops = info->ops;
 	struct msi_desc *desc;
 
 	for_each_msi_entry(desc, dev) {
@@ -518,6 +550,9 @@ void __msi_domain_free_irqs(struct irq_domain *domain, struct device *dev)
 			desc->irq = 0;
 		}
 	}
+
+	if (ops->msi_free_store)
+		ops->msi_free_store(domain, dev);
 }
 
 /**
@@ -545,5 +580,53 @@ struct msi_domain_info *msi_get_domain_info(struct irq_domain *domain)
 {
 	return (struct msi_domain_info *)domain->host_data;
 }
+
+/**
+ * get_dev_msi_entry - Get the nth device MSI entry
+ * @dev: device to operate on
+ * @nr: device-relative interrupt vector index (0-based).
+ *
+ * Return the nth dev_msi entry
+ */
+static struct msi_desc *get_dev_msi_entry(struct device *dev, unsigned int nr)
+{
+	struct msi_desc *entry;
+	int i = 0;
+
+	for_each_msi_entry(entry, dev) {
+		if (i == nr)
+			return entry;
+		i++;
+	}
+
+	WARN_ON_ONCE(!entry);
+	return entry;
+}
+
+/**
+ * dev_msi_irq_vector - Get the Linux IRQ number of a device vector
+ * @dev: device to operate on
+ * @nr: device-relative interrupt vector index (0-based).
+ *
+ * Returns the Linux IRQ number of a device vector.
+ */
+int dev_msi_irq_vector(struct device *dev, unsigned int nr)
+{
+	return get_dev_msi_entry(dev, nr)->irq;
+}
+EXPORT_SYMBOL_GPL(dev_msi_irq_vector);
+
+/**
+ * dev_msi_hwirq - Get the device MSI hw IRQ number of a device vector
+ * @dev: device to operate on
+ * @nr: device-relative interrupt vector index (0-based).
+ *
+ * Return the dev_msi hw IRQ number of a device vector.
+ */
+int dev_msi_hwirq(struct device *dev, unsigned int nr)
+{
+	return get_dev_msi_entry(dev, nr)->device_msi.hwirq;
+}
+EXPORT_SYMBOL_GPL(dev_msi_hwirq);
 
 #endif /* CONFIG_GENERIC_MSI_IRQ_DOMAIN */

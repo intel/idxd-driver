@@ -6,8 +6,10 @@
 
 typedef struct irq_alloc_info msi_alloc_info_t;
 
-int pci_msi_prepare(struct irq_domain *domain, struct device *dev, int nvec,
+int x86_msi_prepare(struct irq_domain *domain, struct device *dev, int nvec,
 		    msi_alloc_info_t *arg);
+
+#define arch_msi_prepare		x86_msi_prepare
 
 /* Structs and defines for the X86 specific MSI message format */
 
