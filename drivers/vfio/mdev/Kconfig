@@ -21,3 +21,12 @@ config VFIO_MDEV_IRQS
 	  devices.
 
 	  If you don't know what to do here, say N.
+
+config VFIO_MDEV_IDXD
+	tristate "VFIO Mediated device driver for Intel IDXD"
+	depends on VFIO && VFIO_MDEV && X86_64
+	select VFIO_MDEV_IMS
+	select IMS_MSI_ARRAY
+	default n
+	help
+	  VFIO based mediated device driver for Intel Accelerator Devices driver.

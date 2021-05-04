@@ -6,3 +6,4 @@ mdev-$(CONFIG_VFIO_MDEV_IRQS) += mdev_irqs.o
 
 obj-$(CONFIG_VFIO_MDEV) += mdev.o
 
+obj-$(CONFIG_VFIO_MDEV_IDXD) += idxd/

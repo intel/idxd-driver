@@ -89,6 +89,7 @@ enum dsa_completion_status {
 	DSA_COMP_HW_ERR1,
 	DSA_COMP_HW_ERR_DRB,
 	DSA_COMP_TRANSLATION_FAIL,
+	DSA_ERR_PCI_CFG = 0x51,
 };
 
 enum iax_completion_status {

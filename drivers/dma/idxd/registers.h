@@ -155,6 +155,7 @@ enum idxd_device_reset_type {
 #define IDXD_INTC_CMD			0x02
 #define IDXD_INTC_OCCUPY			0x04
 #define IDXD_INTC_PERFMON_OVFL		0x08
+#define IDXD_INTC_HALT			0x10
 
 #define IDXD_CMD_OFFSET			0xa0
 union idxd_command_reg {
@@ -278,6 +279,9 @@ union msix_perm {
 	};
 	u32 bits;
 } __packed;
+
+#define MSIX_ENTRY_MASK_INT	0x1
+#define MSIX_ENTRY_CTRL_BYTE	12
 
 union group_flags {
 	struct {
