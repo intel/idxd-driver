@@ -167,6 +167,7 @@ union idxd_command_reg {
 	};
 	u32 bits;
 } __packed;
+#define IDXD_CMD_INT_MASK		0x80000000
 
 enum idxd_cmd {
 	IDXD_CMD_ENABLE_DEVICE = 1,
@@ -233,6 +234,7 @@ enum idxd_cmdsts_err {
 	/* request interrupt handle */
 	IDXD_CMDSTS_ERR_INVAL_INT_IDX = 0x41,
 	IDXD_CMDSTS_ERR_NO_HANDLE,
+	IDXD_CMDSTS_ERR_INVAL_INT_IDX_RELEASE,
 };
 
 #define IDXD_CMDCAP_OFFSET		0xb0
@@ -352,8 +354,16 @@ union wqcfg {
 	u32 bits[8];
 } __packed;
 
-#define WQCFG_PASID_IDX                2
+enum idxd_wq_hw_state {
+	IDXD_WQ_DEV_DISABLED = 0,
+	IDXD_WQ_DEV_ENABLED,
+	IDXD_WQ_DEV_BUSY,
+};
 
+#define WQCFG_PASID_IDX		2
+#define WQCFG_PRIV_IDX		2
+#define WQCFG_MODE_DEDICATED	1
+#define WQCFG_MODE_SHARED	0
 /*
  * This macro calculates the offset into the WQCFG register
  * idxd - struct idxd *

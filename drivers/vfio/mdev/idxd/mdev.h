@@ -30,6 +30,7 @@
 #define VIDXD_MAX_WQS			1
 
 struct vdcm_idxd {
+	struct vfio_device vdev;
 	struct idxd_device *idxd;
 	struct idxd_wq *wq;
 	struct mdev_device *mdev;
@@ -70,6 +71,10 @@ static inline u8 vidxd_state(struct vdcm_idxd *vidxd)
 
 	return gensts->state;
 }
+
+int idxd_mdev_get_pasid(struct mdev_device *mdev, struct vfio_device *vdev, u32 *pasid);
+
+void vidxd_reset(struct vdcm_idxd *vidxd);
 
 int vidxd_cfg_read(struct vdcm_idxd *vidxd, unsigned int pos, void *buf, unsigned int count);
 int vidxd_cfg_write(struct vdcm_idxd *vidxd, unsigned int pos, void *buf, unsigned int size);

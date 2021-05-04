@@ -252,4 +252,410 @@ int vidxd_cfg_write(struct vdcm_idxd *vidxd, unsigned int pos, void *buf, unsign
 	return 0;
 }
 
+static void idxd_complete_command(struct vdcm_idxd *vidxd, enum idxd_cmdsts_err val)
+{
+	u8 *bar0 = vidxd->bar0;
+	u32 *cmd = (u32 *)(bar0 + IDXD_CMD_OFFSET);
+	u32 *cmdsts = (u32 *)(bar0 + IDXD_CMDSTS_OFFSET);
+	u32 *intcause = (u32 *)(bar0 + IDXD_INTCAUSE_OFFSET);
+	struct device *dev = &vidxd->mdev->dev;
+
+	*cmdsts = val;
+	dev_dbg(dev, "%s: cmd: %#x  status: %#x\n", __func__, *cmd, val);
+
+	if (*cmd & IDXD_CMD_INT_MASK) {
+		*intcause |= IDXD_INTC_CMD;
+		vidxd_send_interrupt(vidxd, 0);
+	}
+}
+
+static void vidxd_enable(struct vdcm_idxd *vidxd)
+{
+	u8 *bar0 = vidxd->bar0;
+	union gensts_reg *gensts = (union gensts_reg *)(bar0 + IDXD_GENSTATS_OFFSET);
+
+	if (gensts->state == IDXD_DEVICE_STATE_ENABLED)
+		return idxd_complete_command(vidxd, IDXD_CMDSTS_ERR_DEV_ENABLED);
+
+	/* Check PCI configuration */
+	if (!(vidxd->cfg[PCI_COMMAND] & PCI_COMMAND_MASTER))
+		return idxd_complete_command(vidxd, IDXD_CMDSTS_ERR_BUSMASTER_EN);
+
+	gensts->state = IDXD_DEVICE_STATE_ENABLED;
+	idxd_complete_command(vidxd, IDXD_CMDSTS_SUCCESS);
+}
+
+static void vidxd_disable(struct vdcm_idxd *vidxd)
+{
+	struct idxd_wq *wq;
+	union wqcfg *vwqcfg;
+	u8 *bar0 = vidxd->bar0;
+	union gensts_reg *gensts = (union gensts_reg *)(bar0 + IDXD_GENSTATS_OFFSET);
+	struct mdev_device *mdev = vidxd->mdev;
+	struct device *dev = &mdev->dev;
+	int rc;
+
+	if (gensts->state == IDXD_DEVICE_STATE_DISABLED) {
+		idxd_complete_command(vidxd, IDXD_CMDSTS_ERR_DIS_DEV_EN);
+		return;
+	}
+
+	vwqcfg = (union wqcfg *)(bar0 + VIDXD_WQCFG_OFFSET);
+	wq = vidxd->wq;
+
+	rc = idxd_wq_disable(wq);
+	if (rc < 0) {
+		dev_warn(dev, "vidxd disable (wq disable) failed.\n");
+		idxd_complete_command(vidxd, IDXD_CMDSTS_HW_ERR);
+		return;
+	}
+
+	vwqcfg->wq_state = IDXD_WQ_DISABLED;
+	gensts->state = IDXD_DEVICE_STATE_DISABLED;
+	idxd_complete_command(vidxd, IDXD_CMDSTS_SUCCESS);
+}
+
+static void vidxd_drain_all(struct vdcm_idxd *vidxd)
+{
+	struct idxd_wq *wq = vidxd->wq;
+
+	idxd_wq_drain(wq);
+	idxd_complete_command(vidxd, IDXD_CMDSTS_SUCCESS);
+}
+
+static void vidxd_wq_drain(struct vdcm_idxd *vidxd, int val)
+{
+	u8 *bar0 = vidxd->bar0;
+	union wqcfg *vwqcfg = (union wqcfg *)(bar0 + VIDXD_WQCFG_OFFSET);
+	struct idxd_wq *wq = vidxd->wq;
+
+	if (vwqcfg->wq_state != IDXD_WQ_DEV_ENABLED) {
+		idxd_complete_command(vidxd, IDXD_CMDSTS_ERR_DEV_NOT_EN);
+		return;
+	}
+
+	idxd_wq_drain(wq);
+	idxd_complete_command(vidxd, IDXD_CMDSTS_SUCCESS);
+}
+
+static void vidxd_abort_all(struct vdcm_idxd *vidxd)
+{
+	struct idxd_wq *wq = vidxd->wq;
+	int rc;
+
+	rc = idxd_wq_abort(wq);
+	if (rc < 0) {
+		idxd_complete_command(vidxd, IDXD_CMDSTS_HW_ERR);
+		return;
+	}
+	idxd_complete_command(vidxd, IDXD_CMDSTS_SUCCESS);
+}
+
+static void vidxd_wq_abort(struct vdcm_idxd *vidxd, int val)
+{
+	u8 *bar0 = vidxd->bar0;
+	union wqcfg *vwqcfg = (union wqcfg *)(bar0 + VIDXD_WQCFG_OFFSET);
+	struct idxd_wq *wq = vidxd->wq;
+	int rc;
+
+	if (vwqcfg->wq_state != IDXD_WQ_DEV_ENABLED) {
+		idxd_complete_command(vidxd, IDXD_CMDSTS_ERR_DEV_NOT_EN);
+		return;
+	}
+
+	rc = idxd_wq_abort(wq);
+	if (rc < 0) {
+		idxd_complete_command(vidxd, IDXD_CMDSTS_HW_ERR);
+		return;
+	}
+	idxd_complete_command(vidxd, IDXD_CMDSTS_SUCCESS);
+}
+
+void vidxd_reset(struct vdcm_idxd *vidxd)
+{
+	u8 *bar0 = vidxd->bar0;
+	union gensts_reg *gensts = (union gensts_reg *)(bar0 + IDXD_GENSTATS_OFFSET);
+	union wqcfg *vwqcfg = (union wqcfg *)(bar0 + VIDXD_WQCFG_OFFSET);
+	struct idxd_wq *wq;
+	int rc;
+
+	gensts->state = IDXD_DEVICE_STATE_DRAIN;
+	wq = vidxd->wq;
+
+	if (wq->state == IDXD_WQ_ENABLED) {
+		rc = idxd_wq_abort(wq);
+		if (rc < 0) {
+			idxd_complete_command(vidxd, IDXD_CMDSTS_HW_ERR);
+			return;
+		}
+
+		rc = idxd_wq_disable(wq);
+		if (rc < 0) {
+			idxd_complete_command(vidxd, IDXD_CMDSTS_HW_ERR);
+			return;
+		}
+	}
+
+	vwqcfg->wq_state = IDXD_WQ_DISABLED;
+	gensts->state = IDXD_DEVICE_STATE_DISABLED;
+	idxd_complete_command(vidxd, IDXD_CMDSTS_SUCCESS);
+}
+
+static void vidxd_wq_reset(struct vdcm_idxd *vidxd, int wq_id_mask)
+{
+	struct idxd_wq *wq;
+	u8 *bar0 = vidxd->bar0;
+	union wqcfg *vwqcfg = (union wqcfg *)(bar0 + VIDXD_WQCFG_OFFSET);
+	int rc;
+
+	wq = vidxd->wq;
+	if (vwqcfg->wq_state != IDXD_WQ_DEV_ENABLED) {
+		idxd_complete_command(vidxd, IDXD_CMDSTS_ERR_DEV_NOT_EN);
+		return;
+	}
+
+	rc = idxd_wq_abort(wq);
+	if (rc < 0) {
+		idxd_complete_command(vidxd, IDXD_CMDSTS_HW_ERR);
+		return;
+	}
+
+	rc = idxd_wq_disable(wq);
+	if (rc < 0) {
+		idxd_complete_command(vidxd, IDXD_CMDSTS_HW_ERR);
+		return;
+	}
+
+	vwqcfg->wq_state = IDXD_WQ_DEV_DISABLED;
+	idxd_complete_command(vidxd, IDXD_CMDSTS_SUCCESS);
+}
+
+static void vidxd_alloc_int_handle(struct vdcm_idxd *vidxd, int operand)
+{
+	bool ims = !!(operand & CMD_INT_HANDLE_IMS);
+	u32 cmdsts;
+	struct mdev_device *mdev = vidxd->mdev;
+	struct device *dev = &mdev->dev;
+	int ims_idx, vidx;
+
+	vidx = operand & GENMASK(15, 0);
+
+	/* vidx cannot be 0 since that's emulated and does not require IMS handle */
+	if (vidx <= 0 || vidx >= VIDXD_MAX_MSIX_VECS) {
+		idxd_complete_command(vidxd, IDXD_CMDSTS_ERR_INVAL_INT_IDX);
+		return;
+	}
+
+	if (ims) {
+		dev_warn(dev, "IMS allocation is not implemented yet\n");
+		idxd_complete_command(vidxd, IDXD_CMDSTS_ERR_NO_HANDLE);
+		return;
+	}
+
+	/*
+	 * The index coming from the guest driver will start at 1. Vector 0 is
+	 * the command interrupt and is emulated by the vdcm. Here we are asking
+	 * for the IMS index that's backing the I/O vectors from the relative
+	 * index to the mdev device. This index would start at 0. So for a
+	 * passed in vidx that is 1, we pass 0 to dev_msi_hwirq() and so forth.
+	 */
+	ims_idx = dev_msi_hwirq(dev, vidx - 1);
+	cmdsts = ims_idx << IDXD_CMDSTS_RES_SHIFT;
+	dev_dbg(dev, "requested index %d handle %d\n", vidx, ims_idx);
+	idxd_complete_command(vidxd, cmdsts);
+}
+
+static void vidxd_release_int_handle(struct vdcm_idxd *vidxd, int operand)
+{
+	struct mdev_device *mdev = vidxd->mdev;
+	struct device *dev = &mdev->dev;
+	bool ims = !!(operand & CMD_INT_HANDLE_IMS);
+	int handle, i;
+	bool found = false;
+
+	handle = operand & GENMASK(15, 0);
+	if (ims) {
+		dev_dbg(dev, "IMS allocation is not implemented yet\n");
+		idxd_complete_command(vidxd, IDXD_CMDSTS_ERR_INVAL_INT_IDX_RELEASE);
+		return;
+	}
+
+	/* IMS backed entry start at 1, 0 is emulated vector */
+	for (i = 1; i < VIDXD_MAX_MSIX_VECS; i++) {
+		if (dev_msi_hwirq(dev, i) == handle) {
+			found = true;
+			break;
+		}
+	}
+
+	if (!found) {
+		dev_dbg(dev, "Freeing unallocated int handle.\n");
+		idxd_complete_command(vidxd, IDXD_CMDSTS_ERR_INVAL_INT_IDX_RELEASE);
+	}
+
+	idxd_complete_command(vidxd, IDXD_CMDSTS_SUCCESS);
+}
+
+static void vidxd_wq_enable(struct vdcm_idxd *vidxd, int wq_id)
+{
+	struct idxd_wq *wq;
+	u8 *bar0 = vidxd->bar0;
+	union wq_cap_reg *wqcap;
+	struct mdev_device *mdev = vidxd->mdev;
+	struct device *dev = &mdev->dev;
+	struct idxd_device *idxd;
+	union wqcfg *vwqcfg;
+	unsigned long flags;
+	u32 wq_pasid;
+	int priv, rc;
+
+	if (wq_id >= VIDXD_MAX_WQS) {
+		idxd_complete_command(vidxd, IDXD_CMDSTS_INVAL_WQIDX);
+		return;
+	}
+
+	idxd = vidxd->idxd;
+	wq = vidxd->wq;
+
+	vwqcfg = (union wqcfg *)(bar0 + VIDXD_WQCFG_OFFSET + wq_id * 32);
+	wqcap = (union wq_cap_reg *)(bar0 + IDXD_WQCAP_OFFSET);
+
+	if (vidxd_state(vidxd) != IDXD_DEVICE_STATE_ENABLED) {
+		idxd_complete_command(vidxd, IDXD_CMDSTS_ERR_DEV_NOTEN);
+		return;
+	}
+
+	if (vwqcfg->wq_state != IDXD_WQ_DEV_DISABLED) {
+		idxd_complete_command(vidxd, IDXD_CMDSTS_ERR_WQ_ENABLED);
+		return;
+	}
+
+	if (wq_dedicated(wq) && wqcap->dedicated_mode == 0) {
+		idxd_complete_command(vidxd, IDXD_CMDSTS_ERR_WQ_MODE);
+		return;
+	}
+
+	priv = 1;
+	rc = idxd_mdev_get_pasid(mdev, &vidxd->vdev, &wq_pasid);
+	if (rc < 0) {
+		dev_warn(dev, "idxd pasid setup failed wq %d: %d\n", wq->id, rc);
+		idxd_complete_command(vidxd, IDXD_CMDSTS_ERR_PASID_EN);
+		return;
+	}
+
+	dev_dbg(dev, "program pasid %d in wq %d\n", wq_pasid, wq->id);
+	spin_lock_irqsave(&idxd->dev_lock, flags);
+	idxd_wq_setup_pasid(wq, wq_pasid);
+	idxd_wq_setup_priv(wq, priv);
+	spin_unlock_irqrestore(&idxd->dev_lock, flags);
+	rc = idxd_wq_enable(wq);
+	if (rc < 0) {
+		dev_dbg(dev, "vidxd enable wq %d failed\n", wq->id);
+		spin_lock_irqsave(&idxd->dev_lock, flags);
+		idxd_wq_clear_pasid(wq);
+		idxd_wq_setup_priv(wq, 0);
+		spin_unlock_irqrestore(&idxd->dev_lock, flags);
+		idxd_complete_command(vidxd, IDXD_CMDSTS_HW_ERR);
+		return;
+	}
+
+	vwqcfg->wq_state = IDXD_WQ_DEV_ENABLED;
+	idxd_complete_command(vidxd, IDXD_CMDSTS_SUCCESS);
+}
+
+static void vidxd_wq_disable(struct vdcm_idxd *vidxd, int wq_id_mask)
+{
+	struct idxd_wq *wq;
+	u8 *bar0 = vidxd->bar0;
+	union wqcfg *vwqcfg = (union wqcfg *)(bar0 + VIDXD_WQCFG_OFFSET);
+	int rc;
+
+	wq = vidxd->wq;
+	if (vwqcfg->wq_state != IDXD_WQ_DEV_ENABLED) {
+		idxd_complete_command(vidxd, IDXD_CMDSTS_ERR_DEV_NOT_EN);
+		return;
+	}
+
+	rc = idxd_wq_disable(wq);
+	if (rc < 0) {
+		idxd_complete_command(vidxd, IDXD_CMDSTS_HW_ERR);
+		return;
+	}
+
+	vwqcfg->wq_state = IDXD_WQ_DEV_DISABLED;
+	idxd_complete_command(vidxd, IDXD_CMDSTS_SUCCESS);
+}
+
+static bool command_supported(struct vdcm_idxd *vidxd, u32 cmd)
+{
+	u8 *bar0 = vidxd->bar0;
+	u32 *cmd_cap = (u32 *)(bar0 + IDXD_CMDCAP_OFFSET);
+
+	return !!(*cmd_cap & BIT(cmd));
+}
+
+static void vidxd_do_command(struct vdcm_idxd *vidxd, u32 val)
+{
+	union idxd_command_reg *reg = (union idxd_command_reg *)(vidxd->bar0 + IDXD_CMD_OFFSET);
+	union gensts_reg *gensts = (union gensts_reg *)(vidxd->bar0 + IDXD_GENSTATS_OFFSET);
+	struct mdev_device *mdev = vidxd->mdev;
+	struct device *dev = &mdev->dev;
+
+	reg->bits = val;
+
+	dev_dbg(dev, "%s: cmd code: %u reg: %x\n", __func__, reg->cmd, reg->bits);
+	if (!command_supported(vidxd, reg->cmd)) {
+		idxd_complete_command(vidxd, IDXD_CMDSTS_INVAL_CMD);
+		return;
+	}
+
+	if (gensts->state == IDXD_DEVICE_STATE_HALT) {
+		idxd_complete_command(vidxd, IDXD_CMDSTS_HW_ERR);
+		return;
+	}
+
+	switch (reg->cmd) {
+	case IDXD_CMD_ENABLE_DEVICE:
+		vidxd_enable(vidxd);
+		break;
+	case IDXD_CMD_DISABLE_DEVICE:
+		vidxd_disable(vidxd);
+		break;
+	case IDXD_CMD_DRAIN_ALL:
+		vidxd_drain_all(vidxd);
+		break;
+	case IDXD_CMD_ABORT_ALL:
+		vidxd_abort_all(vidxd);
+		break;
+	case IDXD_CMD_RESET_DEVICE:
+		vidxd_reset(vidxd);
+		break;
+	case IDXD_CMD_ENABLE_WQ:
+		vidxd_wq_enable(vidxd, reg->operand);
+		break;
+	case IDXD_CMD_DISABLE_WQ:
+		vidxd_wq_disable(vidxd, reg->operand);
+		break;
+	case IDXD_CMD_DRAIN_WQ:
+		vidxd_wq_drain(vidxd, reg->operand);
+		break;
+	case IDXD_CMD_ABORT_WQ:
+		vidxd_wq_abort(vidxd, reg->operand);
+		break;
+	case IDXD_CMD_RESET_WQ:
+		vidxd_wq_reset(vidxd, reg->operand);
+		break;
+	case IDXD_CMD_REQUEST_INT_HANDLE:
+		vidxd_alloc_int_handle(vidxd, reg->operand);
+		break;
+	case IDXD_CMD_RELEASE_INT_HANDLE:
+		vidxd_release_int_handle(vidxd, reg->operand);
+		break;
+	default:
+		idxd_complete_command(vidxd, IDXD_CMDSTS_INVAL_CMD);
+		break;
+	}
+}
+
+MODULE_IMPORT_NS(IDXD);
 MODULE_LICENSE("GPL v2");
