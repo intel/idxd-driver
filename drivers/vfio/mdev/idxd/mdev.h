@@ -16,6 +16,7 @@
 #define VIDXD_MSIX_TBL_SZ		0x90
 #define VIDXD_MSIX_PERM_TBL_SZ		0x48
 
+#define VIDXD_VERSION_OFFSET		0
 #define VIDXD_MSIX_PERM_OFFSET		0x300
 #define VIDXD_GRPCFG_OFFSET		0x400
 #define VIDXD_WQCFG_OFFSET		0x500
@@ -74,8 +75,9 @@ static inline u8 vidxd_state(struct vdcm_idxd *vidxd)
 
 int idxd_mdev_get_pasid(struct mdev_device *mdev, struct vfio_device *vdev, u32 *pasid);
 
+void vidxd_init(struct vdcm_idxd *vidxd);
 void vidxd_reset(struct vdcm_idxd *vidxd);
-
+void vidxd_mmio_init(struct vdcm_idxd *vidxd);
 int vidxd_cfg_read(struct vdcm_idxd *vidxd, unsigned int pos, void *buf, unsigned int count);
 int vidxd_cfg_write(struct vdcm_idxd *vidxd, unsigned int pos, void *buf, unsigned int size);
 #endif
