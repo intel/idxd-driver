@@ -201,7 +201,9 @@ union cmdsts_reg {
 	};
 	u32 bits;
 } __packed;
-#define IDXD_CMDSTS_ACTIVE		0x80000000
+
+#define IDXD_CMDS_ACTIVE_BIT		31
+#define IDXD_CMDSTS_ACTIVE		BIT(IDXD_CMDS_ACTIVE_BIT)
 #define IDXD_CMDSTS_ERR_MASK		0xff
 #define IDXD_CMDSTS_RES_SHIFT		8
 
@@ -285,6 +287,8 @@ union msix_perm {
 	u32 bits;
 } __packed;
 
+#define IDXD_MSIX_PERM_MASK	0xfffff00c
+#define IDXD_MSIX_PERM_IGNORE	0x3
 #define MSIX_ENTRY_MASK_INT	0x1
 #define MSIX_ENTRY_CTRL_BYTE	12
 

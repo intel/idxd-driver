@@ -42,6 +42,8 @@ static u64 idxd_pci_config[] = {
 	0x0000000000000000ULL,
 };
 
+static void vidxd_do_command(struct vdcm_idxd *vidxd, u32 val);
+
 static void vidxd_reset_config(struct vdcm_idxd *vidxd)
 {
 	u16 *devid = (u16 *)(vidxd->cfg + PCI_DEVICE_ID);
@@ -139,6 +141,123 @@ static void vidxd_report_pci_error(struct vdcm_idxd *vidxd)
 	gensts->state = IDXD_DEVICE_STATE_HALT;
 
 	send_halt_interrupt(vidxd);
+}
+
+static void vidxd_report_swerror(struct vdcm_idxd *vidxd, unsigned int error)
+{
+	vidxd_set_swerr(vidxd, error);
+	send_swerr_interrupt(vidxd);
+}
+
+int vidxd_mmio_write(struct vdcm_idxd *vidxd, u64 pos, void *buf, unsigned int size)
+{
+	u32 offset = pos & (vidxd->bar_size[0] - 1);
+	u8 *bar0 = vidxd->bar0;
+	struct device *dev = &vidxd->mdev->dev;
+
+	dev_dbg(dev, "vidxd mmio W %d %x %x: %llx\n", vidxd->wq->id, size,
+		offset, get_reg_val(buf, size));
+
+	if (((size & (size - 1)) != 0) || (offset & (size - 1)) != 0)
+		return -EINVAL;
+
+	/* If we don't limit this, we potentially can write out of bound */
+	if (size > sizeof(u32))
+		return -EINVAL;
+
+	switch (offset) {
+	case IDXD_GENCFG_OFFSET ... IDXD_GENCFG_OFFSET + 3:
+		/* Write only when device is disabled. */
+		if (vidxd_state(vidxd) == IDXD_DEVICE_STATE_DISABLED) {
+			dev_warn(dev, "Guest writes to unsupported GENCFG register\n");
+			memcpy(bar0 + offset, buf, size);
+		}
+		break;
+
+	case IDXD_GENCTRL_OFFSET:
+		memcpy(bar0 + offset, buf, size);
+		break;
+
+	case IDXD_INTCAUSE_OFFSET:
+		bar0[offset] &= ~(get_reg_val(buf, 1) & GENMASK(4, 0));
+		break;
+
+	case IDXD_CMD_OFFSET: {
+		u32 *cmdsts = (u32 *)(bar0 + IDXD_CMDSTS_OFFSET);
+		u32 val = get_reg_val(buf, size);
+
+		if (size != sizeof(u32))
+			return -EINVAL;
+
+		/* Check and set command in progress */
+		if (test_and_set_bit(IDXD_CMDS_ACTIVE_BIT, (unsigned long *)cmdsts) == 0)
+			vidxd_do_command(vidxd, val);
+		else
+			vidxd_report_swerror(vidxd, DSA_ERR_CMD_REG);
+		break;
+	}
+
+	case IDXD_SWERR_OFFSET:
+		/* W1C */
+		bar0[offset] &= ~(get_reg_val(buf, 1) & GENMASK(1, 0));
+		break;
+
+	case VIDXD_MSIX_TABLE_OFFSET ...  VIDXD_MSIX_TABLE_OFFSET + VIDXD_MSIX_TBL_SZ - 1: {
+		int index = (offset - VIDXD_MSIX_TABLE_OFFSET) / 0x10;
+		u8 *msix_entry = &bar0[VIDXD_MSIX_TABLE_OFFSET + index * 0x10];
+		u64 *pba = (u64 *)(bar0 + VIDXD_MSIX_PBA_OFFSET);
+		u8 ctrl, new_mask;
+		int ims_index, ims_off;
+		u32 ims_ctrl, ims_mask;
+		struct idxd_device *idxd = vidxd->idxd;
+
+		memcpy(bar0 + offset, buf, size);
+		ctrl = msix_entry[MSIX_ENTRY_CTRL_BYTE];
+
+		new_mask = ctrl & MSIX_ENTRY_MASK_INT;
+		if (!new_mask && test_and_clear_bit(index, (unsigned long *)pba))
+			vidxd_send_interrupt(vidxd, index);
+
+		if (index == 0)
+			break;
+
+		ims_index = dev_msi_hwirq(dev, index - 1);
+		ims_off = idxd->ims_offset + ims_index * 16 + sizeof(u64);
+		ims_ctrl = ioread32(idxd->reg_base + ims_off);
+		ims_mask = ims_ctrl & MSIX_ENTRY_MASK_INT;
+
+		if (new_mask == ims_mask)
+			break;
+
+		if (new_mask)
+			ims_ctrl |= MSIX_ENTRY_MASK_INT;
+		else
+			ims_ctrl &= ~MSIX_ENTRY_MASK_INT;
+
+		iowrite32(ims_ctrl, idxd->reg_base + ims_off);
+		/* readback to flush */
+		ims_ctrl = ioread32(idxd->reg_base + ims_off);
+		break;
+	}
+
+	case VIDXD_MSIX_PERM_OFFSET ...  VIDXD_MSIX_PERM_OFFSET + VIDXD_MSIX_PERM_TBL_SZ - 1:
+		memcpy(bar0 + offset, buf, size);
+		break;
+	} /* offset */
+
+	return 0;
+}
+
+int vidxd_mmio_read(struct vdcm_idxd *vidxd, u64 pos, void *buf, unsigned int size)
+{
+	u32 offset = pos & (vidxd->bar_size[0] - 1);
+	struct device *dev = &vidxd->mdev->dev;
+
+	memcpy(buf, vidxd->bar0 + offset, size);
+
+	dev_dbg(dev, "vidxd mmio R %d %x %x: %llx\n",
+		vidxd->wq->id, size, offset, get_reg_val(buf, size));
+	return 0;
 }
 
 int vidxd_cfg_read(struct vdcm_idxd *vidxd, unsigned int pos, void *buf, unsigned int count)
