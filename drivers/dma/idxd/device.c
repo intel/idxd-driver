@@ -1135,6 +1135,7 @@ int __drv_enable_wq(struct idxd_wq *wq)
 		}
 	}
 
+	rc = 0;
 	spin_lock_irqsave(&idxd->dev_lock, flags);
 	if (test_bit(IDXD_FLAG_CONFIGURABLE, &idxd->flags))
 		rc = idxd_device_config(idxd);
