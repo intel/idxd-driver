@@ -15,6 +15,12 @@
 #include <linux/poll.h>
 #include <uapi/linux/vfio.h>
 
+#define VFIO_PCI_OFFSET_SHIFT   40
+
+#define VFIO_PCI_OFFSET_TO_INDEX(off)	((off) >> VFIO_PCI_OFFSET_SHIFT)
+#define VFIO_PCI_INDEX_TO_OFFSET(index)	((u64)(index) << VFIO_PCI_OFFSET_SHIFT)
+#define VFIO_PCI_OFFSET_MASK	(((u64)(1) << VFIO_PCI_OFFSET_SHIFT) - 1)
+
 struct vfio_device {
 	struct device *dev;
 	const struct vfio_device_ops *ops;
