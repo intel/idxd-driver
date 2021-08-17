@@ -162,6 +162,7 @@ struct idxd_dma_chan {
 };
 
 struct idxd_wq {
+	struct idxd_irq_entry *irq_entry;
 	void __iomem *portal;
 	u32 portal_offset;
 	struct percpu_ref wq_active;
@@ -287,7 +288,6 @@ struct idxd_device {
 
 	union sw_err_reg sw_err;
 	wait_queue_head_t cmd_waitq;
-	int num_wq_irqs;
 	struct idxd_irq_entry *irq_entries;
 
 	struct idxd_dma_dev *idxd_dma;
@@ -528,9 +528,6 @@ irqreturn_t idxd_misc_thread(int vec, void *data);
 irqreturn_t idxd_wq_thread(int irq, void *data);
 void idxd_mask_error_interrupts(struct idxd_device *idxd);
 void idxd_unmask_error_interrupts(struct idxd_device *idxd);
-void idxd_mask_msix_vectors(struct idxd_device *idxd);
-void idxd_mask_msix_vector(struct idxd_device *idxd, int vec_id);
-void idxd_unmask_msix_vector(struct idxd_device *idxd, int vec_id);
 
 /* device control */
 int idxd_register_idxd_drv(void);
@@ -568,6 +565,8 @@ int idxd_wq_set_pasid(struct idxd_wq *wq, int pasid);
 int idxd_wq_disable_pasid(struct idxd_wq *wq);
 void idxd_wq_quiesce(struct idxd_wq *wq);
 int idxd_wq_init_percpu_ref(struct idxd_wq *wq);
+void idxd_wq_free_irq(struct idxd_wq *wq);
+int idxd_wq_enable_irq(struct idxd_wq *wq);
 
 /* submission */
 int idxd_submit_desc(struct idxd_wq *wq, struct idxd_desc *desc);

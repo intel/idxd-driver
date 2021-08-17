@@ -22,13 +22,13 @@ static struct idxd_desc *__get_desc(struct idxd_wq *wq, int idx, int cpu)
 		desc->hw->pasid = idxd->pasid;
 
 	/*
-	 * On host, MSIX vecotr 0 is used for misc interrupt. Therefore when we match
-	 * vector 1:1 to the WQ id, we need to add 1
+	 * On host, MSIX vector 0 is used for misc interrupt. Therefore when we match
+	 * vector to the WQ irq_entry id, we need to minus 1 for the int handle.
 	 */
 	if (!idxd->int_handles)
-		desc->hw->int_handle = wq->id + 1;
+		desc->hw->int_handle = wq->irq_entry->id;
 	else
-		desc->hw->int_handle = idxd->int_handles[wq->id];
+		desc->hw->int_handle = idxd->int_handles[wq->irq_entry->id - 1];
 
 	return desc;
 }
@@ -163,7 +163,7 @@ int idxd_submit_desc(struct idxd_wq *wq, struct idxd_desc *desc)
 	 * that we designated the descriptor to.
 	 */
 	if (desc->hw->flags & IDXD_OP_FLAG_RCI) {
-		ie = &idxd->irq_entries[wq->id + 1];
+		ie = &idxd->irq_entries[wq->irq_entry->id];
 		llist_add(&desc->llnode, &ie->pending_llist);
 	}
 
