@@ -680,18 +680,12 @@ static void msix_mask_all(void __iomem *base, int tsize)
 /**
  * msix_capability_init - configure device's MSI-X capability
  * @dev: pointer to the pci_dev data structure of MSI-X device function
- * @entries: pointer to an array of struct msix_entry entries
- * @nvec: number of @entries
- * @affd: Optional pointer to enable automatic affinity assignment
  *
- * Setup the MSI-X capability structure of device function with a
- * single MSI-X IRQ. A return of zero indicates the successful setup of
- * requested MSI-X entries with allocated IRQs or non-zero for otherwise.
+ * Setup the MSI-X capability structure of device function
  **/
-static int msix_capability_init(struct pci_dev *dev, struct msix_entry *entries,
-				int nvec, struct irq_affinity *affd)
+static int msix_capability_init(struct pci_dev *dev)
 {
-	int ret, tsize;
+	int tsize;
 	u16 control;
 
 	/*
@@ -707,12 +701,29 @@ static int msix_capability_init(struct pci_dev *dev, struct msix_entry *entries,
 	tsize = msix_table_size(control);
 	dev->msix_table_base = msix_map_region(dev, tsize);
 	if (!dev->msix_table_base) {
-		ret = -ENOMEM;
-		goto out_disable;
+		pci_msix_clear_and_set_ctrl(dev, PCI_MSIX_FLAGS_ENABLE, 0);
+		return -ENOMEM;
 	}
 
 	/* Ensure that all table entries are masked. */
 	msix_mask_all(dev->msix_table_base, tsize);
+	return 0;
+}
+
+/**
+ * msix_setup_irqs - setup requested number of MSI-X entries
+ * @dev:	pointer to the pci_dev data structure of MSI-X device function
+ * @entries:	pointer to an array of struct msix_entry entries
+ * @nvec:	number of @entries
+ * @affd:	Optional pointer to enable automatic affinity assignment
+ *
+ * A return of zero indicates the successful setup of the requested IRQs
+ * or non-zero for otherwise.
+ **/
+static int msix_setup_irqs(struct pci_dev *dev, struct msix_entry *entries,
+			   int nvec, struct irq_affinity *affd)
+{
+	int ret = 0;
 
 	ret = msix_setup_entries(dev, entries, nvec, affd);
 	if (ret)
@@ -729,18 +740,20 @@ static int msix_capability_init(struct pci_dev *dev, struct msix_entry *entries,
 
 	msix_update_entries(dev, entries);
 
-	dev->msi_irq_groups = msi_populate_sysfs(&dev->dev);
-	if (IS_ERR(dev->msi_irq_groups)) {
-		ret = PTR_ERR(dev->msi_irq_groups);
-		goto out_free;
+	if (!dev->msix_enabled) {
+		dev->msi_irq_groups = msi_populate_sysfs(&dev->dev);
+		if (IS_ERR(dev->msi_irq_groups)) {
+			ret = PTR_ERR(dev->msi_irq_groups);
+			goto out_free;
+		}
+
+		/* Set MSI-X enabled bits and unmask the function */
+		pci_intx_for_msi(dev, 0);
+		dev->msix_enabled = 1;
+		pci_msix_clear_and_set_ctrl(dev, PCI_MSIX_FLAGS_MASKALL, 0);
+
+		pcibios_free_irq(dev);
 	}
-
-	/* Set MSI-X enabled bits and unmask the function */
-	pci_intx_for_msi(dev, 0);
-	dev->msix_enabled = 1;
-	pci_msix_clear_and_set_ctrl(dev, PCI_MSIX_FLAGS_MASKALL, 0);
-
-	pcibios_free_irq(dev);
 	return 0;
 
 out_avail:
@@ -764,7 +777,8 @@ out_free:
 	free_msi_irqs(dev);
 
 out_disable:
-	pci_msix_clear_and_set_ctrl(dev, PCI_MSIX_FLAGS_ENABLE, 0);
+	if (!dev->msix_enabled)
+		pci_msix_clear_and_set_ctrl(dev, PCI_MSIX_FLAGS_ENABLE, 0);
 
 	return ret;
 }
@@ -927,7 +941,12 @@ static int __pci_enable_msix(struct pci_dev *dev, struct msix_entry *entries,
 		pci_info(dev, "can't enable MSI-X (MSI IRQ already assigned)\n");
 		return -EINVAL;
 	}
-	return msix_capability_init(dev, entries, nvec, affd);
+
+	if (!dev->msix_enabled)
+		if (msix_capability_init(dev))
+			return -ENOMEM;
+
+	return msix_setup_irqs(dev, entries, nvec, affd);
 }
 
 static void pci_msix_shutdown(struct pci_dev *dev)
