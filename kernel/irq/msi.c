@@ -550,7 +550,7 @@ int __msi_domain_alloc_irqs(struct irq_domain *domain, struct device *dev,
 	if (ret)
 		return ret;
 
-	for_each_msi_entry(desc, dev) {
+	for_each_new_msi_entry(desc, dev) {
 		ops->set_desc(&arg, desc);
 
 		virq = __irq_domain_alloc_irqs(domain, -1, desc->nvec_used,
@@ -584,7 +584,7 @@ int __msi_domain_alloc_irqs(struct irq_domain *domain, struct device *dev,
 	if (!(info->flags & MSI_FLAG_ACTIVATE_EARLY))
 		goto skip_activate;
 
-	for_each_msi_vector(desc, i, dev) {
+	for_each_new_msi_vector(desc, i, dev) {
 		if (desc->irq == i) {
 			virq = desc->irq;
 			dev_dbg(dev, "irq [%d-%d] for MSI\n",
@@ -608,7 +608,7 @@ skip_activate:
 	 * so request_irq() will assign the final vector.
 	 */
 	if (can_reserve) {
-		for_each_msi_vector(desc, i, dev) {
+		for_each_new_msi_vector(desc, i, dev) {
 			irq_data = irq_domain_get_irq_data(domain, i);
 			irqd_clr_activated(irq_data);
 		}

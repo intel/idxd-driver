@@ -83,7 +83,7 @@ int __weak arch_setup_msi_irqs(struct pci_dev *dev, int nvec, int type)
 	if (type == PCI_CAP_ID_MSI && nvec > 1)
 		return 1;
 
-	for_each_pci_msi_entry(entry, dev) {
+	for_each_new_pci_msi_entry(entry, dev) {
 		ret = arch_setup_msi_irq(dev, entry);
 		if (ret < 0)
 			return ret;
@@ -510,7 +510,7 @@ static int msi_verify_entries(struct pci_dev *dev)
 	if (!dev->no_64bit_msi)
 		return 0;
 
-	for_each_pci_msi_entry(entry, dev) {
+	for_each_new_pci_msi_entry(entry, dev) {
 		if (entry->msg.address_hi) {
 			pci_err(dev, "arch assigned 64-bit MSI address %#x%08x but device only supports 32 bits\n",
 				entry->msg.address_hi, entry->msg.address_lo);
@@ -612,6 +612,12 @@ static int msix_setup_entries(struct pci_dev *dev,
 	if (affd)
 		masks = irq_create_affinity_masks(nvec, affd);
 
+	/* Store pointer to the last msi_desc entry's list before adding new
+	 * entries to the device msi_list or to the device msi_list itself
+	 * if msi_list is empty.
+	 */
+	dev->dev.msi_last_list = dev->dev.msi_list.prev;
+
 	for (i = 0, curmsk = masks; i < nvec; i++) {
 		entry = alloc_msi_entry(&dev->dev, 1, curmsk);
 		if (!entry) {
@@ -672,7 +678,7 @@ static void msix_update_entries(struct pci_dev *dev, struct msix_entry *entries)
 {
 	struct msi_desc *entry;
 
-	for_each_pci_msi_entry(entry, dev) {
+	for_each_new_pci_msi_entry(entry, dev) {
 		if (entries) {
 			entries->vector = entry->irq;
 			entries++;
@@ -780,7 +786,7 @@ out_avail:
 		struct msi_desc *entry;
 		int avail = 0;
 
-		for_each_pci_msi_entry(entry, dev) {
+		for_each_new_pci_msi_entry(entry, dev) {
 			if (entry->irq != 0)
 				avail++;
 		}

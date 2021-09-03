@@ -409,6 +409,7 @@ struct dev_links_info {
  *		See Documentation/driver-api/pin-control.rst for details.
  * @msi_lock:	Lock to protect MSI mask cache and mask register
  * @msi_list:	Hosts MSI descriptors
+ * @msi_last_list: Pointer to list of last msi_desc entry
  * @msi_domain: The generic MSI domain this device is using.
  * @numa_node:	NUMA node this device is close to.
  * @dma_ops:    DMA mapping operations for this device.
@@ -510,6 +511,7 @@ struct device {
 #ifdef CONFIG_GENERIC_MSI_IRQ
 	raw_spinlock_t		msi_lock;
 	struct list_head	msi_list;
+	struct list_head        *msi_last_list;
 #endif
 #ifdef CONFIG_DMA_OPS
 	const struct dma_map_ops *dma_ops;
