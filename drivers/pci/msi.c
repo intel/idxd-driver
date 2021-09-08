@@ -648,7 +648,7 @@ static int msix_setup_entries(struct pci_dev *dev,
 			      struct irq_affinity *affd)
 {
 	struct irq_affinity_desc *curmsk, *masks = NULL;
-	struct msi_desc *entry;
+	struct msi_desc *entry, *tmp;
 	void __iomem *addr;
 	int ret, i, idx;
 	int vec_count = pci_msix_vec_count(dev);
@@ -709,10 +709,21 @@ static int msix_setup_entries(struct pci_dev *dev,
 	}
 	return 0;
 out:
-	if (!i && !dev->msix_enabled)
-		iounmap(dev->msix_table_base);
-	else
-		free_msi_irqs(dev);
+	if (!dev->msix_enabled) {
+		if (!i)
+			iounmap(dev->msix_table_base);
+		else
+			free_msi_irqs(dev);
+	} else {
+		while (i-- > 0) {
+			list_for_each_entry_safe_reverse(entry, tmp, dev_to_msi_list(&dev->dev),
+							 list) {
+				clear_bit(entry->msi_attrib.entry_nr, dev->msix_map);
+				list_del(&entry->list);
+				free_msi_entry(entry);
+			}
+		}
+	}
 
 	kfree(masks);
 	return ret;
@@ -884,7 +895,12 @@ out_avail:
 	}
 
 out_free:
-	free_msi_irqs(dev);
+	if (ret < 0) {
+		struct msi_desc *desc;
+
+		for_each_new_pci_msi_entry(desc, dev)
+			free_msix_irq(dev, desc->irq);
+	}
 
 out_disable:
 	if (!dev->msix_enabled)
