@@ -1544,6 +1544,7 @@ int pci_alloc_irq_vectors_affinity(struct pci_dev *dev, unsigned int min_vecs,
 int pci_add_msix_irq_vector(struct pci_dev *dev);
 
 void pci_free_irq_vectors(struct pci_dev *dev);
+void pci_free_msix_irq_vector(struct pci_dev *dev, unsigned int irq);
 int pci_irq_vector(struct pci_dev *dev, unsigned int nr);
 const struct cpumask *pci_irq_get_affinity(struct pci_dev *pdev, int vec);
 
@@ -1577,6 +1578,10 @@ static inline int pci_add_msix_irq_vector(struct pci_dev *dev)
 { return -ENOSYS; }
 
 static inline void pci_free_irq_vectors(struct pci_dev *dev)
+{
+}
+
+static inline void pci_free_msix_irq_vector(struct pci_dev *dev, unsigned int irq)
 {
 }
 

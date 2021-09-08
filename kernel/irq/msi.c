@@ -201,10 +201,26 @@ void msi_destroy_sysfs(struct device *dev, const struct attribute_group **msi_ir
 	struct device_attribute *dev_attr;
 	struct attribute **msi_attrs;
 	int count = 0;
+	struct msi_desc *entry;
 
-	if (msi_irq_groups) {
-		sysfs_remove_groups(&dev->kobj, msi_irq_groups);
-		msi_attrs = msi_irq_groups[0]->attrs;
+	if (!msi_irq_groups)
+		return;
+
+	sysfs_remove_groups(&dev->kobj, msi_irq_groups);
+	msi_attrs = msi_irq_groups[0]->attrs;
+
+	entry = first_msi_entry(dev);
+	if (entry->msi_attrib.is_msix) {
+		for_each_msi_entry(entry, dev) {
+			if (msi_attrs[entry->msi_attrib.entry_nr]) {
+				dev_attr = container_of(msi_attrs[entry->msi_attrib.entry_nr],
+							struct device_attribute, attr);
+				kfree(dev_attr->attr.name);
+				kfree(dev_attr);
+				msi_attrs[entry->msi_attrib.entry_nr] = NULL;
+			}
+		}
+	} else {
 		while (msi_attrs[count]) {
 			dev_attr = container_of(msi_attrs[count],
 					struct device_attribute, attr);
@@ -212,10 +228,11 @@ void msi_destroy_sysfs(struct device *dev, const struct attribute_group **msi_ir
 			kfree(dev_attr);
 			++count;
 		}
-		kfree(msi_attrs);
-		kfree(msi_irq_groups[0]);
-		kfree(msi_irq_groups);
 	}
+
+	kfree(msi_attrs);
+	kfree(msi_irq_groups[0]);
+	kfree(msi_irq_groups);
 }
 
 #ifdef CONFIG_GENERIC_MSI_IRQ_DOMAIN
@@ -688,6 +705,25 @@ void msi_domain_free_irqs(struct irq_domain *domain, struct device *dev)
 	struct msi_domain_ops *ops = info->ops;
 
 	return ops->domain_free_irqs(domain, dev);
+}
+
+/**
+ * msi_domain_free_irq - Free interrupt from a MSI interrupt @domain associated to @dev
+ * @domain:	The domain to managing the interrupts
+ * @dev:	Pointer to device struct for which the interrupt needs to be freed
+ * @irq:	Interrupt to be freed
+ */
+void msi_domain_free_irq(struct irq_domain *domain, struct device *dev, unsigned int irq)
+{
+	struct msi_desc *desc = irq_get_msi_desc(irq);
+	struct irq_data *irq_data;
+
+	irq_data = irq_domain_get_irq_data(domain, irq);
+	if (irqd_is_activated(irq_data))
+		irq_domain_deactivate_irq(irq_data);
+
+	irq_domain_free_irqs(desc->irq, 1);
+	desc->irq = 0;
 }
 
 /**

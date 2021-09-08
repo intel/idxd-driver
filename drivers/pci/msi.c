@@ -372,6 +372,11 @@ static void free_msi_irqs(struct pci_dev *dev)
 
 	pci_msi_teardown_msi_irqs(dev);
 
+	if (dev->msi_irq_groups) {
+		msi_destroy_sysfs(&dev->dev, dev->msi_irq_groups);
+		dev->msi_irq_groups = NULL;
+	}
+
 	list_for_each_entry_safe(entry, tmp, msi_list, list) {
 		if (entry->msi_attrib.is_msix) {
 			if (list_is_last(&entry->list, msi_list))
@@ -381,13 +386,52 @@ static void free_msi_irqs(struct pci_dev *dev)
 		list_del(&entry->list);
 		free_msi_entry(entry);
 	}
-
-	if (dev->msi_irq_groups) {
-		msi_destroy_sysfs(&dev->dev, dev->msi_irq_groups);
-		dev->msi_irq_groups = NULL;
-	}
 }
 
+static void pci_msix_teardown_irq(struct pci_dev *dev, unsigned int irq)
+{
+	struct irq_domain *domain;
+
+	domain = dev_get_msi_domain(&dev->dev);
+	if (domain && irq_domain_is_hierarchy(domain))
+		msi_domain_free_irq(domain, &dev->dev, irq);
+}
+
+static void free_msix_irq(struct pci_dev *dev, unsigned int irq)
+{
+	struct list_head *msi_list = dev_to_msi_list(&dev->dev);
+	struct msi_desc *entry, *tmp;
+	struct device_attribute *dev_attr;
+	struct attribute **msi_attrs;
+	int count;
+
+	list_for_each_entry_safe(entry, tmp, msi_list, list) {
+		if (entry->irq == irq) {
+			BUG_ON(irq_has_action(entry->irq));
+
+			clear_bit(entry->msi_attrib.entry_nr, dev->msix_map);
+
+			pci_msix_teardown_irq(dev, irq);
+
+			if (dev->msi_irq_groups) {
+				msi_attrs = dev->msi_irq_groups[0]->attrs;
+				count = entry->msi_attrib.entry_nr;
+				if (msi_attrs[count]) {
+					dev_attr = container_of(msi_attrs[count],
+								struct device_attribute, attr);
+					sysfs_remove_file_from_group(&dev->dev.kobj,
+								     &dev_attr->attr,
+								     "msi_irqs");
+					kfree(dev_attr->attr.name);
+					kfree(dev_attr);
+					msi_attrs[count] = NULL;
+				}
+			}
+			list_del(&entry->list);
+			free_msi_entry(entry);
+		}
+	}
+}
 static void pci_intx_for_msi(struct pci_dev *dev, int enable)
 {
 	if (!(dev->dev_flags & PCI_DEV_FLAGS_MSI_INTX_DISABLE_BUG))
@@ -1043,6 +1087,23 @@ void pci_disable_msix(struct pci_dev *dev)
 	mutex_unlock(&dev->msix_mutex);
 }
 EXPORT_SYMBOL(pci_disable_msix);
+
+/**
+ * pci_free_msix_irq_vector - free previously allocated IRQ for a device
+ * @dev:		PCI device to operate on
+ * @irq:		Linux IRQ number
+ **/
+void pci_free_msix_irq_vector(struct pci_dev *dev, unsigned int irq)
+{
+	if (!pci_msi_enable || !dev || !dev->msix_enabled)
+		return;
+
+	mutex_lock(&dev->msix_mutex);
+	free_msix_irq(dev, irq);
+	dev->msix_alloc_count -= 1;
+	mutex_unlock(&dev->msix_mutex);
+}
+EXPORT_SYMBOL(pci_free_msix_irq_vector);
 
 void pci_no_msi(void)
 {

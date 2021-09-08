@@ -177,6 +177,13 @@ API should be called after pci_alloc_irq_vectors has been called by the driver.
 This API returns the device-relative interrupt vector index (0-based) which can
 be passed to pci_irq_vector() to retrieve the corresponding Linux IRQ number.
 
+To free the allocated resources associated with a particular MSI-X vector, the
+pci_free_msix_irq_vector() API can be used::
+
+        void pci_free_msix_irq_vector(struct pci_dev *dev, unsigned int irq)
+
+Here, 'irq' refers to the Linux IRQ number.
+
 Legacy APIs
 -----------
 
