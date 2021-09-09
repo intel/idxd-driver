@@ -473,6 +473,7 @@ struct pci_dev {
 #ifdef CONFIG_PCI_MSI
 	const struct attribute_group **msi_irq_groups;
 	void __iomem	*msix_table_base;	/* Base address of device MSI-X table */
+	struct mutex	msix_mutex;		/* Serialize MSI-X interrupt allocation */
 #endif
 	struct pci_vpd	vpd;
 #ifdef CONFIG_PCIE_DPC

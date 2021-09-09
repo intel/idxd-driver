@@ -976,8 +976,10 @@ void pci_disable_msix(struct pci_dev *dev)
 	if (!pci_msi_enable || !dev || !dev->msix_enabled)
 		return;
 
+	mutex_lock(&dev->msix_mutex);
 	pci_msix_shutdown(dev);
 	free_msi_irqs(dev);
+	mutex_unlock(&dev->msix_mutex);
 }
 EXPORT_SYMBOL(pci_disable_msix);
 
@@ -1078,7 +1080,9 @@ static int __pci_enable_msix_range(struct pci_dev *dev,
 				return -ENOSPC;
 		}
 
+		mutex_lock(&dev->msix_mutex);
 		rc = __pci_enable_msix(dev, entries, nvec, affd, flags);
+		mutex_unlock(&dev->msix_mutex);
 		if (rc == 0)
 			return nvec;
 
