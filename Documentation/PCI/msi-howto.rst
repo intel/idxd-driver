@@ -164,6 +164,19 @@ the driver can specify that only MSI or MSI-X is acceptable::
 	if (nvec < 0)
 		goto out_err;
 
+To request additional MSI-X vectors after the probe phase, the
+pci_add_msix_irq_vector() API can be used::
+
+        irq = pci_add_msix_irq_vectors(struct pci_dev *dev);
+        if (irq < 0)
+                goto out_err;
+
+Each time this API is called, one MSI-X vector gets added to the device. This
+API should be called after pci_alloc_irq_vectors has been called by the driver.
+
+This API returns the device-relative interrupt vector index (0-based) which can
+be passed to pci_irq_vector() to retrieve the corresponding Linux IRQ number.
+
 Legacy APIs
 -----------
 

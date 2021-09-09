@@ -114,9 +114,22 @@ const struct attribute_group **msi_populate_sysfs(struct device *dev)
 	int count = 0;
 	int i;
 
-	/* Determine how many msi entries we have */
-	for_each_msi_entry(entry, dev)
-		num_msi += entry->nvec_used;
+	entry = first_msi_entry(dev);
+	if (entry->msi_attrib.is_msix) {
+		/* Since msi-x vectors can be allocated multiple times,
+		 * allocate maximum no. of vectors supported by the device
+		 */
+#ifdef CONFIG_PCI_MSI
+		num_msi = pci_msix_vec_count(to_pci_dev(dev));
+#endif
+	}
+
+	if (!num_msi) {
+		/* Determine how many msi entries we have */
+		for_each_msi_entry(entry, dev)
+			num_msi += entry->nvec_used;
+	}
+
 	if (!num_msi)
 		return NULL;
 
