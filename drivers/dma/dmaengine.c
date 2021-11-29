@@ -1222,6 +1222,13 @@ int dma_async_device_register(struct dma_device *device)
 		return -EIO;
 	}
 
+	if (dma_has_cap(DMA_KERNEL_USER, device->cap_mask) && (!device->device_prep_memcpy_sva_kernel_user
+				|| !device->device_prep_memcpy_sva_single_kernel_user)) {
+		dev_err(device->dev,
+			"Device claims capability %s, but op is not defined\n",
+			"DMA_KERNEL_USER");
+		return -EIO;
+	}
 
 	if (!device->device_tx_status) {
 		dev_err(device->dev, "Device tx_status is not defined\n");

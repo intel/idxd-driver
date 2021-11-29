@@ -283,6 +283,10 @@ Currently, the types available are:
     as end of burst instead of end of transfer) will be added in the future
     based on DMA clients needs, if and when the need arises.
 
+- DMA_KERNEL_USER
+
+  - The device supports copying between kernel and user address space.
+
 These various types will also affect how the source and destination
 addresses change over time.
 

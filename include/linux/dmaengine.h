@@ -64,6 +64,7 @@ enum dma_transaction_type {
 	DMA_INTERLEAVE,
 	DMA_REPEAT,
 	DMA_LOAD_EOT,
+	DMA_KERNEL_USER,
 /* last transaction type for creation of the capabilities mask */
 	DMA_TX_TYPE_END,
 };
@@ -81,6 +82,21 @@ enum dma_transfer_direction {
 	DMA_DEV_TO_MEM,
 	DMA_DEV_TO_DEV,
 	DMA_TRANS_NONE,
+};
+
+enum dma_chan_attr {
+	DMA_CHAN_SET_PASID,
+};
+
+struct dma_chan_pasid_params {
+	int pasid;
+	bool priv;
+};
+
+struct dma_chan_attr_params {
+	union {
+		struct dma_chan_pasid_params p;
+	};
 };
 
 /**
@@ -924,6 +940,16 @@ struct dma_device {
 	struct dma_async_tx_descriptor *(*device_prep_dma_imm_data)(
 		struct dma_chan *chan, dma_addr_t dst, u64 data,
 		unsigned long flags);
+	struct dma_async_tx_descriptor *(*device_prep_memcpy_sva_kernel_user)(
+		struct dma_chan *chan, struct iov_iter *dst_iter,
+		struct iov_iter *src_iter, unsigned long flags);
+
+	struct dma_async_tx_descriptor *(*device_prep_memcpy_sva_single_kernel_user)(
+		struct dma_chan *chan, void __user *dst,
+		void *src, size_t len, unsigned long flags);
+
+	int (*device_chan_set_attr)(struct dma_chan *chan,
+			enum dma_chan_attr attr, struct dma_chan_attr_params *p);
 
 	void (*device_caps)(struct dma_chan *chan,
 			    struct dma_slave_caps *caps);
@@ -1059,6 +1085,36 @@ static inline struct dma_async_tx_descriptor *dmaengine_prep_dma_memcpy_sg(
 	return chan->device->device_prep_dma_memcpy_sg(chan, dst_sg, dst_nents,
 						       src_sg, src_nents,
 						       flags);
+}
+
+static inline struct dma_async_tx_descriptor *dmaengine_prep_memcpy_sva_kernel_user(
+		struct dma_chan *chan, struct iov_iter *dst_iter,
+		struct iov_iter *src_iter, unsigned long flags)
+{
+	if (!chan || !chan->device || !chan->device->device_prep_memcpy_sva_kernel_user)
+		return NULL;
+
+	return chan->device->device_prep_memcpy_sva_kernel_user(chan, dst_iter,
+			src_iter, flags);
+}
+
+static inline struct dma_async_tx_descriptor *dmaengine_prep_memcpy_sva_single_kernel_user(
+		struct dma_chan *chan, void __user *dst,
+		void *src, size_t len, unsigned long flags)
+{
+	if (!chan || !chan->device || !chan->device->device_prep_memcpy_sva_single_kernel_user)
+		return NULL;
+
+	return chan->device->device_prep_memcpy_sva_single_kernel_user(chan, dst,
+			src, len, flags);
+}
+
+static inline int dmaengine_chan_set_attr(struct dma_chan *chan, enum dma_chan_attr attr, void *data)
+{
+	if (!chan || !chan->device || !chan->device->device_chan_set_attr)
+		return -EINVAL;
+
+	return chan->device->device_chan_set_attr(chan, attr, data);
 }
 
 static inline bool dmaengine_is_metadata_mode_supported(struct dma_chan *chan,
