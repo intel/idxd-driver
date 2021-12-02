@@ -390,6 +390,7 @@ static void idxd_wq_disable_cleanup(struct idxd_wq *wq)
 	memset(wq->driver_name, 0, WQ_NAME_SIZE);
 	wq->max_xfer_bytes = WQ_DEFAULT_MAX_XFER;
 	wq->max_batch_size = WQ_DEFAULT_MAX_BATCH;
+	wq->chan_count = IDXD_DMA_CHANS;
 }
 
 static void idxd_wq_device_reset_cleanup(struct idxd_wq *wq)
