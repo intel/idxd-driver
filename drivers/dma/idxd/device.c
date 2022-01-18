@@ -39,6 +39,60 @@ void idxd_mask_error_interrupts(struct idxd_device *idxd)
 	iowrite32(genctrl.bits, idxd->reg_base + IDXD_GENCTRL_OFFSET);
 }
 
+static int alloc_desc_batch(struct idxd_wq *wq, struct idxd_desc *desc)
+{
+	struct idxd_device *idxd = wq->idxd;
+	struct device *dev = &idxd->pdev->dev;
+	struct idxd_batch *batch;
+	unsigned int size, cr_size, num;
+
+	batch = kzalloc_node(sizeof(*batch), GFP_KERNEL, dev_to_node(dev));
+	if (!batch)
+		return -ENOMEM;
+
+	num = wq->max_batch_size;
+	size = num * sizeof(struct dsa_hw_desc);
+	batch->descs = dma_alloc_coherent(dev, size, &batch->dma_descs, GFP_KERNEL);
+	if (!batch->descs)
+		goto descs_err;
+
+	cr_size = num * idxd->data->compl_size;
+	batch->crs = dma_alloc_coherent(dev, cr_size, &batch->dma_crs, GFP_KERNEL);
+	if (!batch->crs)
+		goto crs_err;
+
+	batch->max = num;
+	desc->batch = batch;
+
+	return 0;
+
+crs_err:
+	dma_free_coherent(dev, size, batch->descs, batch->dma_descs);
+descs_err:
+	kfree(batch);
+	dev_warn(dev, "Unable to allocate memory, consider lowering max batch size.\n");
+	return -ENOMEM;
+}
+
+static void free_desc_batch(struct idxd_wq *wq, struct idxd_desc *desc)
+{
+	struct idxd_device *idxd = wq->idxd;
+	struct device *dev = &idxd->pdev->dev;
+	unsigned int size, cr_size, num;
+	struct idxd_batch *batch;
+
+	batch = desc->batch;
+	if (!batch)
+		return;
+
+	num = wq->max_batch_size;
+	size = num * sizeof(struct dsa_hw_desc);
+	cr_size = num * idxd->data->compl_size;
+	dma_free_coherent(dev, size, batch->descs, batch->dma_descs);
+	dma_free_coherent(dev, cr_size, batch->crs, batch->dma_crs);
+	kfree(batch);
+}
+
 static void free_hw_descs(struct idxd_wq *wq)
 {
 	int i;
@@ -76,8 +130,10 @@ static void free_descs(struct idxd_wq *wq)
 {
 	int i;
 
-	for (i = 0; i < wq->num_descs; i++)
+	for (i = 0; i < wq->num_descs; i++) {
+		free_desc_batch(wq, wq->descs[i]);
 		kfree(wq->descs[i]);
+	}
 
 	kfree(wq->descs);
 }
@@ -142,9 +198,12 @@ int idxd_wq_alloc_resources(struct idxd_wq *wq)
 		struct idxd_desc *desc = wq->descs[i];
 
 		desc->hw = wq->hw_descs[i];
-		if (idxd->data->type == IDXD_TYPE_DSA)
+		if (idxd->data->type == IDXD_TYPE_DSA) {
 			desc->completion = &wq->compls[i];
-		else if (idxd->data->type == IDXD_TYPE_IAX)
+			/* pre-allocate batch for descriptor */
+			if (alloc_desc_batch(wq, desc))
+				goto fail_sbitmap_init;
+		} else if (idxd->data->type == IDXD_TYPE_IAX)
 			desc->iax_completion = &wq->iax_compls[i];
 		desc->compl_dma = wq->compls_addr + idxd->data->compl_size * i;
 		desc->id = i;
