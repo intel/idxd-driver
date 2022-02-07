@@ -13,6 +13,7 @@
 #include <linux/of_device.h>
 #include <linux/slab.h>
 #include <linux/vmalloc.h>
+#include <linux/uio.h>
 #include "debug.h"
 #include "direct.h"
 
@@ -139,6 +140,45 @@ static inline bool dma_map_direct(struct device *dev,
 	return dma_go_direct(dev, *dev->dma_mask, ops);
 }
 
+static inline bool is_kernel_direct_map(unsigned long start, phys_addr_t size)
+{
+	return (start >= PAGE_OFFSET) && ((start + size) <= VMALLOC_START);
+}
+
+void *dma_map_sva_single_attrs(struct device *dev, void *addr,
+		size_t size, enum dma_data_direction dir, bool user,
+		unsigned long attrs)
+{
+	BUG_ON(!valid_dma_direction(dir));
+
+	if (WARN_ON_ONCE(!dev->dma_mask))
+		return NULL;
+
+	if (user) {
+		might_fault();
+
+		if (should_fail_usercopy())
+			return NULL;
+
+		if (!access_ok(addr, size))
+			return NULL;
+	} else {
+		if (is_vmalloc_addr(addr) || is_vmalloc_addr(addr + size - 1))
+			return NULL;
+	}
+
+	return addr;
+}
+EXPORT_SYMBOL(dma_map_sva_single_attrs);
+
+void dma_unmap_sva_single_attrs(struct device *dev, void *addr,
+		size_t size, enum dma_data_direction dir, bool user,
+		unsigned long attrs)
+{
+	/* Nothing to do for now */
+}
+EXPORT_SYMBOL(dma_unmap_sva_single_attrs);
+
 dma_addr_t dma_map_page_attrs(struct device *dev, struct page *page,
 		size_t offset, size_t size, enum dma_data_direction dir,
 		unsigned long attrs)
@@ -176,6 +216,75 @@ void dma_unmap_page_attrs(struct device *dev, dma_addr_t addr, size_t size,
 	debug_dma_unmap_page(dev, addr, size, dir);
 }
 EXPORT_SYMBOL(dma_unmap_page_attrs);
+
+static bool dma_sva_copy_to_user_ok(struct iov_iter *iter, int num, int rw)
+{
+	int i;
+
+	if (likely(iter_is_iovec(iter))) {
+		/* User buffers */
+		const struct iovec *iov = iter->iov;
+
+		might_fault();
+		if (should_fail_usercopy())
+			return false;
+
+		for (i = 0; i < iter->nr_segs; i++) {
+			if (!access_ok(iov[i].iov_base, iov[i].iov_len))
+				return false;
+		}
+	} else if (iov_iter_is_kvec(iter)) {
+		/* Kernel buffers */
+		const struct kvec *kvec = iter->kvec;
+
+		for (i = 0; i < iter->nr_segs; i++) {
+			if (is_vmalloc_addr(kvec[i].iov_base) ||
+				is_vmalloc_addr(kvec[i].iov_base + kvec[i].iov_len))
+				return false;
+		}
+	} else if (iov_iter_is_bvec(iter)) {
+		/* Physical Page buffers */
+		//const struct bio_vec *bvec = iter->bvec;
+
+		/* TODO: What checks should we perform for a bio_vec? */
+		return true;
+	} else {
+		/* TODO: Should we also check for xa buffers? */
+		WARN_ONCE(1, "Unknown iterator type %d\n", iter->iter_type);
+		return false;
+	}
+	return true;
+}
+
+int dma_map_sva_sg_attrs(struct device *dev,
+	struct iov_iter *i, int num, enum dma_data_direction dir, unsigned long attrs)
+{
+	BUG_ON(!valid_dma_direction(dir));
+
+	if (WARN_ON_ONCE(!dev->dma_mask))
+		return 0;
+
+	/* Check for acces permissions */
+	if (!dma_sva_copy_to_user_ok(i, num, (dir == DMA_TO_DEVICE)? READ: WRITE))
+		return 0;
+
+	/* No new mapping needed as SVA is being used. */
+
+	/* TODO: Should the API copy the input buffer addresses into an
+	 * output iov_iter after 'mapping'? Since there is no new mapping created,
+	 * there is no need to copy and we can let the caller use the input addresses
+	 */
+	return i->nr_segs;
+}
+EXPORT_SYMBOL(dma_map_sva_sg_attrs);
+
+void dma_unmap_sva_sg_attrs(struct device *dev,
+	struct iov_iter *i, int num, enum dma_data_direction dir, unsigned long attrs)
+{
+	/* Nothing to do for now */
+
+}
+EXPORT_SYMBOL(dma_unmap_sva_sg_attrs);
 
 static int __dma_map_sg_attrs(struct device *dev, struct scatterlist *sg,
 	 int nents, enum dma_data_direction dir, unsigned long attrs)

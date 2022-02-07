@@ -103,10 +103,20 @@ static inline int dma_mapping_error(struct device *dev, dma_addr_t dma_addr)
 dma_addr_t dma_map_page_attrs(struct device *dev, struct page *page,
 		size_t offset, size_t size, enum dma_data_direction dir,
 		unsigned long attrs);
+void *dma_map_sva_single_attrs(struct device *dev, void *addr,
+                size_t size, enum dma_data_direction dir, bool user,
+                unsigned long attrs);
+void dma_unmap_sva_single_attrs(struct device *dev, void *addr,
+                size_t size, enum dma_data_direction dir, bool user,
+                unsigned long attrs);
 void dma_unmap_page_attrs(struct device *dev, dma_addr_t addr, size_t size,
 		enum dma_data_direction dir, unsigned long attrs);
 unsigned int dma_map_sg_attrs(struct device *dev, struct scatterlist *sg,
 		int nents, enum dma_data_direction dir, unsigned long attrs);
+int dma_map_sva_sg_attrs(struct device *dev,
+	struct iov_iter *i, int num, enum dma_data_direction dir, unsigned long attrs);
+void dma_unmap_sva_sg_attrs(struct device *dev,
+	struct iov_iter *i, int num, enum dma_data_direction dir, unsigned long attrs);
 void dma_unmap_sg_attrs(struct device *dev, struct scatterlist *sg,
 				      int nents, enum dma_data_direction dir,
 				      unsigned long attrs);
@@ -406,11 +416,16 @@ static inline void dma_sync_sgtable_for_device(struct device *dev,
 #define dma_map_single(d, a, s, r) dma_map_single_attrs(d, a, s, r, 0)
 #define dma_unmap_single(d, a, s, r) dma_unmap_single_attrs(d, a, s, r, 0)
 #define dma_map_sg(d, s, n, r) dma_map_sg_attrs(d, s, n, r, 0)
+#define dma_map_sva_sg(d, s, n, r) dma_map_sva_sg_attrs(d, s, n, r, 0)
+#define dma_unmap_sva_sg(d, s, n, r) dma_unmap_sva_sg_attrs(d, s, n, r, 0)
 #define dma_unmap_sg(d, s, n, r) dma_unmap_sg_attrs(d, s, n, r, 0)
 #define dma_map_page(d, p, o, s, r) dma_map_page_attrs(d, p, o, s, r, 0)
 #define dma_unmap_page(d, a, s, r) dma_unmap_page_attrs(d, a, s, r, 0)
 #define dma_get_sgtable(d, t, v, h, s) dma_get_sgtable_attrs(d, t, v, h, s, 0)
 #define dma_mmap_coherent(d, v, c, h, s) dma_mmap_attrs(d, v, c, h, s, 0)
+#define dma_map_sva_single(d, o, s, r, u) dma_map_sva_single_attrs(d, o, s, r, u, 0)
+#define dma_unmap_sva_single(d, o, s, r, u) dma_unmap_sva_single_attrs(d, o, s, r, u, 0)
+
 
 static inline void *dma_alloc_coherent(struct device *dev, size_t size,
 		dma_addr_t *dma_handle, gfp_t gfp)
