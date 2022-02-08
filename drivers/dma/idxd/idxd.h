@@ -171,6 +171,11 @@ enum idxd_complete_type {
 struct idxd_dma_chan {
 	struct dma_chan chan;
 	struct idxd_wq *wq;
+
+	/* for KERNEL_USER DMA Channels */
+	int pasid;
+	bool priv;
+	bool pasid_valid;
 };
 
 struct idxd_wq {

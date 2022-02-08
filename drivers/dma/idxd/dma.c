@@ -147,6 +147,189 @@ idxd_dma_submit_memcpy(struct dma_chan *c, dma_addr_t dma_dest,
 	return &desc->txd;
 }
 
+static struct dma_async_tx_descriptor *
+idxd_dma_kernel_user(struct dma_chan *chan, struct iov_iter *u_iter,
+		      struct iov_iter *k_iter, unsigned long flags)
+{
+	struct idxd_dma_chan *idxd_chan = container_of(chan, struct idxd_dma_chan, chan);
+	struct idxd_wq *wq = idxd_chan->wq;
+	u32 desc_flags;
+	struct idxd_device *idxd = wq->idxd;
+	struct idxd_desc *desc;
+	size_t total;
+
+	if (wq->state != IDXD_WQ_ENABLED)
+		return NULL;
+
+	if (!idxd_chan->pasid_valid) {
+		pr_err("pasid not setup on a SVA kernel to user DMA channel\n");
+		return NULL;
+	}
+
+	if (!iter_is_iovec(u_iter) || !iov_iter_is_kvec(k_iter))
+		return NULL;
+
+	desc = dmachan_alloc_desc(chan, IDXD_OP_NONBLOCK);
+	if (IS_ERR(desc))
+		return NULL;
+
+	if (!wq_dedicated(wq)) {
+		/* configure pasid in the desc for shared wq */
+		desc->hw->pasid = idxd_chan->pasid;
+		desc->hw->priv = idxd_chan->priv;
+	}
+
+	total = 0;
+
+	do {
+		void *kbuf;
+		size_t ofs = 0;
+		size_t slen = min(k_iter->count,
+			k_iter->kvec->iov_len - k_iter->iov_offset);
+
+		if (likely(slen)) {
+			kbuf = k_iter->kvec->iov_base + k_iter->iov_offset;
+
+			while (ofs < slen && iov_iter_count(u_iter)) {
+				const struct iovec *iov = u_iter->iov;
+				size_t len = min(u_iter->count,
+					iov->iov_len - u_iter->iov_offset);
+				struct dsa_hw_desc *hw;
+
+				len = min(len, slen - ofs);
+
+				if (desc->batch->num >= desc->batch->max) {
+					idxd_free_desc(wq, desc);
+					return NULL;
+				}
+
+				/* If we are going to end up with only 1
+				 * descriptor in the batch, do a non-batch
+				 * descriptor instead.
+				 */
+				if (!desc->batch->num && (len == k_iter->count
+						|| len == u_iter->count)) {
+					hw = desc->hw;
+					op_flag_setup(flags, &desc_flags);
+					idxd_prep_desc_common(wq, hw, DSA_OPCODE_MEMMOVE,
+						(u64)(kbuf + ofs), (u64)(iov->iov_base +
+						u_iter->iov_offset),
+						len, (u64)desc->completion, desc_flags);
+				} else {
+					hw = &desc->batch->descs[desc->batch->num];
+					desc->batch->num++;
+					idxd_prep_desc_common(wq, hw, DSA_OPCODE_MEMMOVE,
+						(u64)(kbuf + ofs), (u64)(iov->iov_base +
+						u_iter->iov_offset),
+						len, 0, 0);
+				}
+
+				//pr_info("preparing desc src %llx dst %llx len %x\n", hw->src_addr, hw->dst_addr, hw->xfer_size);
+				iov_iter_advance(u_iter, len);
+				ofs += len;
+			}
+
+			total += ofs;
+		}
+
+		iov_iter_advance(k_iter, ofs);
+
+	} while(iov_iter_count(k_iter) && iov_iter_count(u_iter));
+
+	if (total > idxd->max_xfer_bytes){
+		idxd_free_desc(wq, desc);
+		return NULL;
+	}
+
+	if (desc->batch->num) {
+		op_flag_setup(flags, &desc_flags);
+		idxd_prep_desc_common(wq, desc->hw, DSA_OPCODE_BATCH,
+				(u64)desc->batch->descs, 0,
+				desc->batch->num, (u64)desc->completion,
+				desc_flags);
+	}
+	//pr_info("preparing batch desc compl %llx src %llx dst %llx len %x\n",
+		//desc->hw->completion_addr, desc->hw->src_addr, desc->hw->dst_addr, desc->hw->xfer_size);
+
+	return &desc->txd;
+}
+
+static inline int idxd_dma_chan_set_attr(struct dma_chan *chan,
+		enum dma_chan_attr attr, struct dma_chan_attr_params *param)
+{
+	struct idxd_dma_chan *idxd_chan = container_of(chan, struct idxd_dma_chan, chan);
+	struct idxd_wq *wq = idxd_chan->wq;
+	struct device *dev = &wq->idxd->pdev->dev;
+	struct dma_device *dma_dev = &wq->idxd->idxd_dma->dma;
+	int rc;
+
+	switch(attr) {
+		case DMA_CHAN_SET_PASID:
+			if (!dma_has_cap(DMA_KERNEL_USER, dma_dev->cap_mask))
+				return -EINVAL;
+
+			if (wq_dedicated(wq)) {
+				pr_info("setting pasid in wq %d to %d\n", wq->id, param->p.pasid);
+				rc = idxd_wq_set_pasid(wq, param->p.pasid);
+				if (rc < 0) {
+					dev_err(dev, "wq set pasid failed: %d\n", rc);
+					return rc;
+				}
+			}
+			idxd_chan->pasid = param->p.pasid;
+			idxd_chan->priv = param->p.priv;
+			idxd_chan->pasid_valid = true;
+		break;
+		default:
+			dev_err(dev, "Invalid dma channel attribute %d\n", attr);
+			return -EINVAL;
+	}
+	return 0;
+}
+
+
+static struct dma_async_tx_descriptor *
+idxd_dma_single_kernel_user(struct dma_chan *chan, void __user *dst,
+		      void *src, size_t len, unsigned long flags)
+{
+
+	struct idxd_dma_chan *idxd_chan = container_of(chan, struct idxd_dma_chan, chan);
+	struct idxd_wq *wq = idxd_chan->wq;
+	u32 desc_flags;
+	struct idxd_device *idxd = wq->idxd;
+	struct idxd_desc *desc;
+
+	if (wq->state != IDXD_WQ_ENABLED)
+		return NULL;
+
+	if (!idxd_chan->pasid_valid) {
+		pr_err("pasid not setup on a SVA kernel to user DMA channel\n");
+		return NULL;
+	}
+
+	/* TODO: handle len > idxd->max_xfer_bytes case */
+	if (len == 0 || len > idxd->max_xfer_bytes)
+		return NULL;
+
+	op_flag_setup(flags, &desc_flags);
+	desc = dmachan_alloc_desc(chan, IDXD_OP_NONBLOCK);
+	if (IS_ERR(desc))
+		return NULL;
+
+	if (!wq_dedicated(wq)) {
+		/* configure pasid in the desc for shared wq */
+		desc->hw->pasid = idxd_chan->pasid;
+		desc->hw->priv = idxd_chan->priv;
+	}
+
+	//pr_info("preparing desc compl %px src %px dst %px len %lx\n", desc->completion, src, dst, len);
+	idxd_prep_desc_common(wq, desc->hw, DSA_OPCODE_MEMMOVE,
+			      (u64)src, (u64)dst, len, (u64)desc->completion,
+			      desc_flags);
+
+	return &desc->txd;
+}
+
 static int idxd_dma_alloc_chan_resources(struct dma_chan *chan)
 {
 	struct idxd_wq *wq = to_idxd_wq(chan);
@@ -160,10 +343,26 @@ static int idxd_dma_alloc_chan_resources(struct dma_chan *chan)
 
 static void idxd_dma_free_chan_resources(struct dma_chan *chan)
 {
-	struct idxd_wq *wq = to_idxd_wq(chan);
+	struct idxd_dma_chan *idxd_chan = container_of(chan, struct idxd_dma_chan, chan);
+	struct idxd_wq *wq = idxd_chan->wq;
 	struct device *dev = &wq->idxd->pdev->dev;
 
 	idxd_wq_put(wq);
+
+	if (idxd_chan->pasid_valid) {
+		idxd_chan->pasid = 0;
+		idxd_chan->priv = 0;
+		idxd_chan->pasid_valid = 0;
+		/* For dedicated WQ, restore the previous PASID
+		 */
+		if (wq_dedicated(wq)) {
+			int rc;
+			pr_info("restoring pasid in wq %d to %d\n", wq->id, wq->idxd->pasid);
+			rc = idxd_wq_set_pasid(wq, wq->idxd->pasid);
+			if (rc < 0)
+				dev_err(dev, "wq set pasid failed: %d\n", rc);
+		}
+	}
 	dev_dbg(dev, "%s: client_count: %d\n", __func__,
 		idxd_wq_refcount(wq));
 }
@@ -222,7 +421,11 @@ static enum dma_status idxd_dma_tx_status(struct dma_chan *dma_chan,
 		else
 			idxd_dma_complete_txd(desc, IDXD_COMPLETE_NORMAL, true);
 
-		return DMA_COMPLETE;
+		//pr_info("dsa completion status %x\n", status);
+		if (status == DSA_COMP_SUCCESS)
+			return DMA_COMPLETE;
+		else
+			return DMA_ERROR;
 	}
 
 	return DMA_IN_PROGRESS;
@@ -294,6 +497,15 @@ int idxd_register_dma_device(struct idxd_device *idxd)
 	if (idxd->hw.opcap.bits[0] & IDXD_OPCAP_MEMMOVE) {
 		dma_cap_set(DMA_MEMCPY, dma->cap_mask);
 		dma->device_prep_dma_memcpy = idxd_dma_submit_memcpy;
+		if (device_pasid_enabled(idxd)) {
+			dma_cap_set(DMA_KERNEL_USER, dma->cap_mask);
+			dma->device_prep_memcpy_sva_kernel_user =
+				idxd_dma_kernel_user;
+			dma->device_prep_memcpy_sva_single_kernel_user =
+				idxd_dma_single_kernel_user;
+			dma->device_chan_set_attr =
+				idxd_dma_chan_set_attr;
+		}
 	}
 
 	dma->device_tx_status = idxd_dma_tx_status;
