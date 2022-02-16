@@ -14,7 +14,6 @@
 #include <linux/io-64-nonatomic-lo-hi.h>
 #include <linux/device.h>
 #include <linux/idr.h>
-#include <linux/intel-svm.h>
 #include <linux/iommu.h>
 #include <linux/dma-iommu.h>
 #include <uapi/linux/idxd.h>
@@ -498,7 +497,6 @@ static int idxd_probe(struct idxd_device *idxd)
 		return rc;
 
 	dev_dbg(dev, "IDXD reset complete\n");
-
 	if (IS_ENABLED(CONFIG_INTEL_IDXD_SVM) && sva) {
 		rc = iommu_dev_enable_feature(dev, IOMMU_DEV_FEAT_SVA);
 		if (rc) {

@@ -164,6 +164,34 @@ enum iommu_dev_features {
 
 #define IOMMU_PASID_INVALID	(-1U)
 
+/*
+ * The IOMMU_SVA_BIND_SUPERVISOR flag requests a PASID which can be used only
+ * for access to kernel addresses. No IOTLB flushes are automatically done
+ * for kernel mappings; it is valid only for access to the kernel's static
+ * 1:1 mapping of physical memory — not to vmalloc or even module mappings.
+ * A future API addition may permit the use of such ranges, by means of an
+ * explicit IOTLB flush call (akin to the DMA API's unmap method).
+ *
+ * It is unlikely that we will ever hook into flush_tlb_kernel_range() to
+ * do such IOTLB flushes automatically.
+ */
+#define IOMMU_SVA_BIND_SUPERVISOR       BIT(0)
+/*
+ * Bind a process for kernel work submission to user, returns a kernel PASID
+ * for the process.
+ */
+#define IOMMU_SVA_BIND_KERNEL  BIT(1)
+/*
+ * Bind a guest process. This flag is used to handle the difference between
+ * native bind in terms of life cycle and page requests.
+ */
+#define IOMMU_SVA_BIND_GUEST   BIT(2)
+/*
+ * Bind requres different guest-host PASID namespace, thus PASID translations
+ * are needed during bind and page requests injection into the guest.
+ */
+#define IOMMU_SVA_BIND_GPASID  BIT(3)
+
 #ifdef CONFIG_IOMMU_API
 
 /**
@@ -294,7 +322,9 @@ struct iommu_ops {
 	int (*aux_attach_dev)(struct iommu_domain *domain, struct device *dev);
 	void (*aux_detach_dev)(struct iommu_domain *domain, struct device *dev);
 	int (*aux_get_pasid)(struct iommu_domain *domain, struct device *dev);
-	struct iommu_sva *(*sva_bind)(struct device *dev, struct mm_struct *mm);
+
+	struct iommu_sva *(*sva_bind)(struct device *dev, struct mm_struct *mm,
+				      unsigned int flags);
 	void (*sva_unbind)(struct iommu_sva *handle);
 	int (*attach_dev_pasid)(struct iommu_domain *domain,
 				struct device *dev, ioasid_t id);
@@ -703,7 +733,8 @@ void iommu_aux_detach_device(struct iommu_domain *domain, struct device *dev);
 int iommu_aux_get_pasid(struct iommu_domain *domain, struct device *dev);
 
 struct iommu_sva *iommu_sva_bind_device(struct device *dev,
-					struct mm_struct *mm);
+					struct mm_struct *mm,
+					unsigned int flags);
 void iommu_sva_unbind_device(struct iommu_sva *handle);
 u32 iommu_sva_get_pasid(struct iommu_sva *handle);
 
@@ -1062,7 +1093,7 @@ iommu_aux_get_pasid(struct iommu_domain *domain, struct device *dev)
 }
 
 static inline struct iommu_sva *
-iommu_sva_bind_device(struct device *dev, struct mm_struct *mm)
+iommu_sva_bind_device(struct device *dev, struct mm_struct *mm, unsigned int flags)
 {
 	return NULL;
 }

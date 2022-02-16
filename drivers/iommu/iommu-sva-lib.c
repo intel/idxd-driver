@@ -22,7 +22,8 @@ static DECLARE_IOASID_SET(iommu_sva_pasid);
  *
  * Returns 0 on success and < 0 on error.
  */
-int iommu_sva_alloc_pasid(struct mm_struct *mm, ioasid_t min, ioasid_t max)
+int iommu_sva_alloc_pasid(struct mm_struct *mm, ioasid_t min, ioasid_t max,
+			unsigned int flags)
 {
 	int ret = 0;
 	ioasid_t pasid;
@@ -32,16 +33,18 @@ int iommu_sva_alloc_pasid(struct mm_struct *mm, ioasid_t min, ioasid_t max)
 		return -EINVAL;
 
 	mutex_lock(&iommu_sva_lock);
-	/* Is a PASID already associated with this mm? */
-	if (pasid_valid(mm->pasid)) {
-		if (mm->pasid < min || mm->pasid >= max)
-			ret = -EOVERFLOW;
+	/* Each mm can have two PASIDs, pasid for user, kpasid for kernel */
+	pasid = (flags & IOMMU_SVA_BIND_KERNEL) ? mm->kpasid : mm->pasid;
+	if (pasid_valid(pasid)) {
+		ret = -EBUSY;
 		goto out;
 	}
 
 	pasid = ioasid_alloc(&iommu_sva_pasid, min, max, mm);
 	if (!pasid_valid(pasid))
 		ret = -ENOMEM;
+	if (flags & IOMMU_SVA_BIND_KERNEL)
+		mm_kpasid_set(mm, pasid);
 	else
 		mm_pasid_set(mm, pasid);
 out:

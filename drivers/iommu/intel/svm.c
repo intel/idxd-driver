@@ -66,13 +66,20 @@ svm_lookup_device_by_sid(struct intel_svm *svm, u16 sid)
 }
 
 static struct intel_svm_dev *
-svm_lookup_device_by_dev(struct intel_svm *svm, struct device *dev)
+svm_lookup_device_by_dev(struct intel_svm *svm, struct device *dev,
+			unsigned int pasid)
 {
 	struct intel_svm_dev *sdev = NULL, *t;
 
 	rcu_read_lock();
+	/*
+	 * Each device could bind as user or kernel, so we must match
+	 * both dev and pasid.
+	 */
+	dev_dbg(dev, "%s: svm pasid %d kpasid %d finding %d\n",
+		__func__, svm->pasid, svm->kpasid, pasid);
 	list_for_each_entry_rcu(t, &svm->devs, list) {
-		if (t->dev == dev) {
+		if (t->dev == dev && t->pasid == pasid) {
 			sdev = t;
 			break;
 		}
@@ -304,7 +311,7 @@ static int pasid_to_svm_sdev(struct device *dev, unsigned int pasid,
 	 */
 	if (WARN_ON(list_empty(&svm->devs)))
 		return -EINVAL;
-	sdev = svm_lookup_device_by_dev(svm, dev);
+	sdev = svm_lookup_device_by_dev(svm, dev, pasid);
 
 out:
 	*rsvm = svm;
@@ -391,7 +398,7 @@ int intel_svm_bind_gpasid(struct iommu_domain *domain, struct device *dev,
 		svm->pasid = data->hpasid;
 		if (data->flags & IOMMU_SVA_GPASID_VAL) {
 			svm->gpasid = data->gpasid;
-			svm->flags |= SVM_FLAG_GUEST_PASID;
+			svm->flags |= IOMMU_SVA_BIND_GPASID;
 		}
 		pasid_private_add(data->hpasid, svm);
 		INIT_LIST_HEAD_RCU(&svm->devs);
@@ -441,7 +448,7 @@ int intel_svm_bind_gpasid(struct iommu_domain *domain, struct device *dev,
 		goto out;
 	}
 
-	svm->flags |= SVM_FLAG_GUEST_MODE;
+	svm->flags |= IOMMU_SVA_BIND_GUEST;
 
 	init_rcu_head(&sdev->rcu);
 	list_add_rcu(&sdev->list, &svm->devs);
@@ -500,34 +507,41 @@ out:
 	return ret;
 }
 
-static int intel_svm_alloc_pasid(struct device *dev, struct mm_struct *mm)
+static int intel_svm_alloc_pasid(struct device *dev, struct mm_struct *mm, unsigned int flags)
 {
 	ioasid_t max_pasid = dev_is_pci(dev) ?
 			pci_max_pasids(to_pci_dev(dev)) : intel_pasid_max_id;
 
-	return iommu_sva_alloc_pasid(mm, PASID_MIN, max_pasid - 1);
+	return iommu_sva_alloc_pasid(mm, PASID_MIN, max_pasid - 1, flags);
 }
 
 static struct iommu_sva *intel_svm_bind_mm(struct intel_iommu *iommu,
 					   struct device *dev,
-					   struct mm_struct *mm)
+					   struct mm_struct *mm,
+					   unsigned int flags)
 {
 	struct device_domain_info *info = get_domain_info(dev);
 	unsigned long iflags, sflags = 0;
 	struct intel_svm_dev *sdev;
 	struct intel_svm *svm;
 	int ret = 0;
+	u32 pasid;
 
-	svm = pasid_private_find(mm->pasid);
+	pasid = (flags & IOMMU_SVA_BIND_KERNEL) ? mm->kpasid : mm->pasid;
+
+	svm = pasid_private_find(pasid);
 	if (!svm) {
 		svm = kzalloc(sizeof(*svm), GFP_KERNEL);
 		if (!svm)
 			return ERR_PTR(-ENOMEM);
-
-		svm->pasid = mm->pasid;
+		if (flags & IOMMU_SVA_BIND_KERNEL)
+			svm->kpasid = pasid;
+		else
+			svm->pasid = pasid;
+		dev_dbg(dev, "%s: First bind pgd %llx pasid %d flag: %x\n",
+			__func__, (u64)mm->pgd, pasid, flags);
 		svm->mm = mm;
 		INIT_LIST_HEAD_RCU(&svm->devs);
-
 		svm->notifier.ops = &intel_mmuops;
 		ret = mmu_notifier_register(&svm->notifier, mm);
 		if (ret) {
@@ -535,7 +549,7 @@ static struct iommu_sva *intel_svm_bind_mm(struct intel_iommu *iommu,
 			return ERR_PTR(ret);
 		}
 
-		ret = pasid_private_add(svm->pasid, svm);
+		ret = pasid_private_add(pasid, svm);
 		if (ret) {
 			if (svm->notifier.ops)
 				mmu_notifier_unregister(&svm->notifier, mm);
@@ -545,7 +559,7 @@ static struct iommu_sva *intel_svm_bind_mm(struct intel_iommu *iommu,
 	}
 
 	/* Find the matching device in svm list */
-	sdev = svm_lookup_device_by_dev(svm, dev);
+	sdev = svm_lookup_device_by_dev(svm, dev, pasid);
 	if (sdev) {
 		sdev->users++;
 		goto success;
@@ -562,7 +576,8 @@ static struct iommu_sva *intel_svm_bind_mm(struct intel_iommu *iommu,
 	sdev->did = FLPT_DEFAULT_DID;
 	sdev->sid = PCI_DEVID(info->bus, info->devfn);
 	sdev->users = 1;
-	sdev->pasid = svm->pasid;
+	/* sdev is per bind, it does not care user vs. kernel bind */
+	sdev->pasid = pasid;
 	sdev->sva.dev = dev;
 	init_rcu_head(&sdev->rcu);
 	if (info->ats_enabled) {
@@ -573,9 +588,10 @@ static struct iommu_sva *intel_svm_bind_mm(struct intel_iommu *iommu,
 	}
 
 	/* Setup the pasid table: */
+	sflags = (flags & IOMMU_SVA_BIND_KERNEL) ? PASID_FLAG_SUPERVISOR_MODE : 0;
 	sflags |= cpu_feature_enabled(X86_FEATURE_LA57) ? PASID_FLAG_FL5LP : 0;
 	spin_lock_irqsave(&iommu->lock, iflags);
-	ret = intel_pasid_setup_first_level(iommu, dev, mm->pgd, mm->pasid,
+	ret = intel_pasid_setup_first_level(iommu, dev, mm->pgd, pasid,
 					    FLPT_DEFAULT_DID, sflags);
 	spin_unlock_irqrestore(&iommu->lock, iflags);
 
@@ -629,14 +645,15 @@ static int intel_svm_unbind_mm(struct device *dev, u32 pasid)
 			 * large and has to be physically contiguous. So it's
 			 * hard to be as defensive as we might like. */
 			intel_pasid_tear_down_entry(iommu, dev,
-						    svm->pasid, false);
-			intel_svm_drain_prq(dev, svm->pasid);
+						    pasid, false);
+			intel_svm_drain_prq(dev, pasid);
 			kfree_rcu(sdev, rcu);
 
 			if (list_empty(&svm->devs)) {
 				if (svm->notifier.ops)
 					mmu_notifier_unregister(&svm->notifier, mm);
-				pasid_private_remove(svm->pasid);
+				pasid_private_remove(pasid);
+
 				/* We mandate that no page faults may be outstanding
 				 * for the PASID when intel_svm_unbind_mm() is called.
 				 * If that is not obeyed, subtle errors will happen.
@@ -645,6 +662,13 @@ static int intel_svm_unbind_mm(struct device *dev, u32 pasid)
 				kfree(svm);
 			}
 		}
+		/*
+		 * User PASID stays with the mm for its lifetime, kernel PASID
+		 * can be freed upon unbind since there is no outstanding tasks
+		 * still can use ENQCMD.
+		 */
+		if (mm->kpasid == pasid)
+			mm_kpasid_drop(mm);
 	}
 out:
 	return ret;
@@ -895,6 +919,7 @@ static irqreturn_t prq_event_thread(int irq, void *d)
 	struct page_req_dsc *req;
 	int head, tail, handled;
 	u64 address;
+	u32 pasid = INVALID_IOASID;
 
 	/*
 	 * Clear PPR bit before reading head/tail registers, to ensure that
@@ -925,19 +950,13 @@ bad_req:
 			goto bad_req;
 		}
 
-		if (unlikely(req->pm_req && (req->rd_req | req->wr_req))) {
-			pr_err("IOMMU: %s: Page request in Privilege Mode\n",
-			       iommu->name);
-			goto bad_req;
-		}
-
 		if (unlikely(req->exe_req && req->rd_req)) {
 			pr_err("IOMMU: %s: Execution request not supported\n",
 			       iommu->name);
 			goto bad_req;
 		}
 
-		if (!svm || svm->pasid != req->pasid) {
+		if (!svm || pasid != req->pasid) {
 			/*
 			 * It can't go away, because the driver is not permitted
 			 * to unbind the mm while any page faults are outstanding.
@@ -945,6 +964,17 @@ bad_req:
 			svm = pasid_private_find(req->pasid);
 			if (IS_ERR_OR_NULL(svm))
 				goto bad_req;
+
+			/*
+			 * During bind, kernel and user PASIDs are stored in
+			 * the same svm struct. Track PASID for the next round
+			 * such that we can avoid lookup if the next PRQ PASID
+			 * is the same.
+			 */
+			if (req->pm_req && (req->rd_req | req->wr_req))
+				pasid = svm->kpasid;
+			else
+				pasid = svm->pasid;
 		}
 
 		if (!sdev || sdev->sid != req->rid) {
@@ -994,20 +1024,29 @@ prq_advance:
 	return IRQ_RETVAL(handled);
 }
 
-struct iommu_sva *intel_svm_bind(struct device *dev, struct mm_struct *mm)
+struct iommu_sva *intel_svm_bind(struct device *dev, struct mm_struct *mm, unsigned int flags)
 {
 	struct intel_iommu *iommu = device_to_iommu(dev, NULL, NULL);
 	struct iommu_sva *sva;
 	int ret;
 
+	if ((flags & IOMMU_SVA_BIND_KERNEL) && !ecap_srs(iommu->ecap)) {
+		dev_err(dev, "%s: Supervisor PASID not supported\n",
+			iommu->name);
+		return ERR_PTR(-EOPNOTSUPP);
+	}
+
 	mutex_lock(&pasid_mutex);
-	ret = intel_svm_alloc_pasid(dev, mm);
+	ret = intel_svm_alloc_pasid(dev, mm, flags);
 	if (ret) {
 		mutex_unlock(&pasid_mutex);
 		return ERR_PTR(ret);
 	}
 
-	sva = intel_svm_bind_mm(iommu, dev, mm);
+	sva = intel_svm_bind_mm(iommu, dev, mm, flags);
+	if (IS_ERR_OR_NULL(sva) && (flags & IOMMU_SVA_BIND_KERNEL))
+		mm_kpasid_drop(mm);
+
 	mutex_unlock(&pasid_mutex);
 
 	return sva;
@@ -1088,7 +1127,7 @@ int intel_svm_page_response(struct device *dev,
 	 * For responses from userspace, need to make sure that the
 	 * pasid has been bound to its mm.
 	 */
-	if (svm->flags & SVM_FLAG_GUEST_MODE) {
+	if (svm->flags & IOMMU_SVA_BIND_GUEST) {
 		struct mm_struct *mm;
 
 		mm = get_task_mm(current);
