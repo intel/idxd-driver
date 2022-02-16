@@ -636,6 +636,7 @@ struct mm_struct {
 
 #ifdef CONFIG_IOMMU_SVA
 		u32 pasid;
+		u32 kpasid;
 #endif
 	} __randomize_layout;
 
