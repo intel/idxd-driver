@@ -317,6 +317,11 @@ enum rw_hint {
 /* can use bio alloc cache */
 #define IOCB_ALLOC_CACHE	(1 << 21)
 
+/* iocb->ki_copy_to_iter can be used to offload data copies */
+#define IOCB_DMA_COPY		(1 << 22)
+
+typedef void (*ki_copy_to_iter_cpl)(struct kiocb *, void *, int);
+
 struct kiocb {
 	struct file		*ki_filp;
 
@@ -330,6 +335,12 @@ struct kiocb {
 	u16			ki_hint;
 	u16			ki_ioprio; /* See linux/ioprio.h */
 	struct wait_page_queue	*ki_waitq; /* for async buffered IO */
+
+	size_t (*ki_copy_to_iter)(struct kiocb *, struct iov_iter *dst_iter,
+		struct iov_iter *src_iter,
+		ki_copy_to_iter_cpl cb_fn, void *cb_arg,
+		unsigned long flags);
+
 	randomized_struct_fields_end
 };
 

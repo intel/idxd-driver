@@ -81,6 +81,8 @@
 #include <linux/tracehook.h>
 #include <linux/audit.h>
 #include <linux/security.h>
+#include <linux/dmaengine.h>
+#include <linux/iommu.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/io_uring.h>
@@ -384,6 +386,14 @@ struct io_ring_ctx {
 		unsigned		sq_thread_idle;
 	} ____cacheline_aligned_in_smp;
 
+	struct {
+		struct dma_chan		*chan;
+		struct iommu_sva	*sva;
+		unsigned int		pasid;
+		struct io_dma_task	*head;
+		struct io_dma_task	*tail;
+	} dma;
+
 	/* IRQ completion list, under ->completion_lock */
 	struct io_wq_work_list	locked_free_list;
 	unsigned int		locked_free_nr;
@@ -477,6 +487,17 @@ struct io_uring_task {
 	struct io_wq_work_list	prior_task_list;
 	struct callback_head	task_work;
 	bool			task_running;
+};
+
+struct io_dma_task {
+	struct io_kiocb		*req;
+	dma_cookie_t		cookie;
+	struct iov_iter		*dst;
+	struct iov_iter		*src;
+	u32			len;
+	ki_copy_to_iter_cpl	cb_fn;
+	void			*cb_arg;
+	struct io_dma_task	*next;
 };
 
 /*
@@ -891,6 +912,11 @@ struct io_kiocb {
 	/* stores selected buf, valid IFF REQ_F_BUFFER_SELECTED is set */
 	struct io_buffer		*kbuf;
 	atomic_t			poll_refs;
+
+	/* for tasks leveraging dma-offload this is refcounted */
+	unsigned int			dma_refcnt;
+	int				dma_result;
+	struct io_dma_task		*head;
 };
 
 struct io_tctx_node {
@@ -3621,6 +3647,162 @@ static bool need_read_all(struct io_kiocb *req)
 		S_ISBLK(file_inode(req->file)->i_mode);
 }
 
+static size_t __io_dma_copy_to_iter(struct kiocb *iocb,
+		struct iov_iter *dst_iter, struct iov_iter *src_iter,
+		ki_copy_to_iter_cpl cb_fn, void *cb_arg,
+		unsigned long flags)
+{
+	struct io_kiocb *req;
+	struct io_ring_ctx *ctx;
+	struct device *dev;
+	struct dma_async_tx_descriptor *tx;
+	struct io_dma_task *dma, *tmp;
+	int rc;
+
+	req = container_of(iocb, struct io_kiocb, rw.kiocb);
+	ctx = req->ctx;
+	dev = ctx->dma.chan->device->dev;
+
+	rc = iov_iter_count(dst_iter);
+	if (rc > req->result)
+		rc = req->result;
+
+	if (!dma_map_sva_sg(dev, dst_iter, dst_iter->nr_segs, DMA_FROM_DEVICE)) {
+		return -EINVAL;
+	}
+
+	if (!dma_map_sva_sg(dev, src_iter, src_iter->nr_segs, DMA_TO_DEVICE)) {
+		dma_unmap_sva_sg(dev, dst_iter, dst_iter->nr_segs, DMA_FROM_DEVICE);
+		return -EINVAL;
+	}
+
+	/* Remove the interrupt flag. We'll poll for completions. */
+	flags &= ~(unsigned long)DMA_PREP_INTERRUPT;
+
+	tx = dmaengine_prep_memcpy_sva_kernel_user(ctx->dma.chan, dst_iter, src_iter, flags);
+	if (!tx) {
+		rc = -EFAULT;
+		goto error_unmap;
+	}
+
+	dma = kzalloc(sizeof(*dma), GFP_KERNEL);
+	if (!dma) {
+		rc = -ENOMEM;
+		goto error_unmap;
+	}
+
+	txd_clear_parent(tx);
+
+	dma->req = req;
+	dma->dst = dst_iter;
+	dma->src = src_iter;
+	dma->len = rc;
+	dma->cb_fn = cb_fn;
+	dma->cb_arg = cb_arg;
+	dma->cookie = dmaengine_submit(tx);
+	if (dma_submit_error(dma->cookie)) {
+		rc = -EFAULT;
+		goto error_free;
+	}
+
+	req->dma_refcnt++;
+
+	dma_async_issue_pending(ctx->dma.chan);
+
+	if (!req->head)
+		req->head = dma;
+	else {
+		tmp = req->head;
+		while (tmp->next)
+			tmp = tmp->next;
+		tmp->next = dma;
+	}
+
+	return rc;
+
+error_free:
+	kfree(dma);
+error_unmap:
+	dma_unmap_sva_sg(dev, dst_iter, dst_iter->nr_segs, DMA_FROM_DEVICE);
+	dma_unmap_sva_sg(dev, src_iter, src_iter->nr_segs, DMA_TO_DEVICE);
+
+	return rc;
+}
+
+static int __io_dma_poll(struct io_ring_ctx *ctx)
+{
+	struct io_dma_task *dma, *next, *prev;
+	int ret;
+	struct io_kiocb *req;
+	struct device *dev;
+
+	if (!ctx->dma.chan)
+		return 0;
+	
+	dev = ctx->dma.chan->device->dev;
+
+	dma = ctx->dma.head;
+	prev = NULL;
+	while (dma != NULL) {
+		next = dma->next;
+
+		ret = dmaengine_async_is_tx_complete(ctx->dma.chan, dma->cookie);
+
+		if (ret == DMA_IN_PROGRESS) {
+			/*
+			 * Stop polling here. We rely on completing operations
+			 * in submission order for error handling below to be
+			 * correct. Later entries in this list may well be
+			 * complete at this point, but we cannot process
+			 * them yet. Re-ordering, fortunately, is rare.
+			 */
+			break;
+		}
+
+		dma_unmap_sva_sg(dev, dma->dst, dma->dst->nr_segs, DMA_FROM_DEVICE);
+		dma_unmap_sva_sg(dev, dma->src, dma->src->nr_segs, DMA_TO_DEVICE);
+
+		req = dma->req;
+
+		if (ret == DMA_COMPLETE) {
+			/*
+			 * If this DMA was successful and no earlier DMA failed,
+			 * we increment the total amount copied. Preserve
+			 * earlier failures otherwise.
+			 */
+			if (req->dma_result >= 0)
+				req->dma_result += dma->len;
+		} else {
+			/*
+			 * If this DMA failed, report the whole operation
+			 * as a failure. Some data may have been copied
+			 * as part of an earlier DMA operation that will
+			 * be ignored.
+			 */
+			req->dma_result = -EFAULT;
+		}
+
+		if (dma->cb_fn)
+			dma->cb_fn(&req->rw.kiocb, dma->cb_arg, req->dma_result >= 0 ? dma->len : req->dma_result);
+
+		kfree(dma);
+		req->dma_refcnt--;
+
+		if (req->dma_refcnt == 0)
+			__io_complete_rw(req, req->dma_result, 0);
+
+		prev = dma;
+		dma = next;
+	}
+
+	/* Remove all the entries we've processed */
+	ctx->dma.head = dma;
+	if (!dma)
+		ctx->dma.tail = NULL;
+
+	return ctx->dma.head ? 1 : 0;
+}
+
 static int io_read(struct io_kiocb *req, unsigned int issue_flags)
 {
 	struct io_rw_state __s, *s = &__s;
@@ -3665,7 +3847,40 @@ static int io_read(struct io_kiocb *req, unsigned int issue_flags)
 		return ret;
 	}
 
+	/* Set up support for copy offload */
+	if (force_nonblock && req->ctx->dma.chan != NULL) {
+		struct kiocb *kiocb = &req->rw.kiocb;
+
+		kiocb->ki_flags |= IOCB_DMA_COPY;
+		kiocb->ki_copy_to_iter = __io_dma_copy_to_iter;
+		req->dma_refcnt = 0;
+		req->dma_result = 0;
+		req->head = NULL;
+	}
+
 	ret = io_iter_do_read(req, &s->iter);
+
+	if ((kiocb->ki_flags & IOCB_DMA_COPY) != 0) {
+		if (req->dma_refcnt > 0) {
+			struct io_dma_task *dma = req->head;
+
+			if (req->ctx->dma.tail == NULL)
+				req->ctx->dma.head = dma;
+			else
+				req->ctx->dma.tail->next = dma;
+
+			while (dma->next) {
+				dma = dma->next;
+			}
+			req->ctx->dma.tail = dma;
+
+			req->head = NULL;
+			ret = -EIOCBQUEUED;
+		}
+
+		kiocb->ki_flags &= ~IOCB_DMA_COPY;
+		kiocb->ki_copy_to_iter = NULL;
+	}
 
 	if (ret == -EAGAIN || (req->flags & REQ_F_REISSUE)) {
 		req->flags &= ~REQ_F_REISSUE;
@@ -7495,6 +7710,7 @@ static int __io_sq_thread(struct io_ring_ctx *ctx, bool cap_entries)
 {
 	unsigned int to_submit;
 	int ret = 0;
+	int ret2 = 0;
 
 	to_submit = io_sqring_entries(ctx);
 	/* if we're handling multiple rings, cap submit size for fairness */
@@ -7518,6 +7734,7 @@ static int __io_sq_thread(struct io_ring_ctx *ctx, bool cap_entries)
 		if (to_submit && likely(!percpu_ref_is_dying(&ctx->refs)) &&
 		    !(ctx->flags & IORING_SETUP_R_DISABLED))
 			ret = io_submit_sqes(ctx, to_submit);
+
 		mutex_unlock(&ctx->uring_lock);
 
 		if (to_submit && wq_has_sleeper(&ctx->sqo_sq_wait))
@@ -7525,6 +7742,14 @@ static int __io_sq_thread(struct io_ring_ctx *ctx, bool cap_entries)
 		if (creds)
 			revert_creds(creds);
 	}
+
+	mutex_lock(&ctx->uring_lock);
+
+	ret2 = __io_dma_poll(ctx);
+	if (ret == 0 && ret2 > 0)
+		ret = ret2;
+
+	mutex_unlock(&ctx->uring_lock);
 
 	return ret;
 }
@@ -9429,6 +9654,95 @@ static void io_wait_rsrc_data(struct io_rsrc_data *data)
 		wait_for_completion(&data->done);
 }
 
+static void io_release_dma_chan(struct io_ring_ctx *ctx)
+{
+	unsigned long dma_sync_wait_timeout = jiffies + msecs_to_jiffies(5000);
+	struct io_dma_task *dma, *next;
+	int ret;
+
+	if (ctx->dma.chan != NULL) {
+		dma = ctx->dma.head;
+		while (dma) {
+			next = dma->next;
+
+			do {
+				ret = dmaengine_async_is_tx_complete(ctx->dma.chan, dma->cookie);
+
+				if (time_after_eq(jiffies, dma_sync_wait_timeout)) {
+					break;
+				}
+			} while (ret == DMA_IN_PROGRESS);
+
+			if (ret == DMA_IN_PROGRESS) {
+				pr_warn("Hung DMA offload task %p\n", dma);
+
+				kfree(dma);
+			}
+
+			dma = next;
+		}
+
+		ctx->dma.head = NULL;
+		ctx->dma.tail = NULL;
+	}
+
+	if (ctx->dma.sva && !IS_ERR(ctx->dma.sva))
+		iommu_sva_unbind_device(ctx->dma.sva);
+	if (ctx->dma.chan && !IS_ERR(ctx->dma.chan))
+		dma_release_channel(ctx->dma.chan);
+	ctx->dma.chan = NULL;
+}
+
+static int io_allocate_dma_chan(struct io_ring_ctx *ctx,
+				struct io_uring_params *p)
+{
+	dma_cap_mask_t mask;
+	struct device *dev;
+	int rc = 0;
+	struct dma_chan_attr_params param;
+	int flags = IOMMU_SVA_BIND_KERNEL;
+
+	dma_cap_zero(mask);
+	dma_cap_set(DMA_MEMCPY, mask);
+	dma_cap_set(DMA_KERNEL_USER, mask);
+
+	ctx->dma.chan = dma_request_chan_by_mask(&mask);
+	if (IS_ERR(ctx->dma.chan)) {
+		rc = PTR_ERR(ctx->dma.chan);
+		goto failed;
+	}
+
+	dev = ctx->dma.chan->device->dev;
+	ctx->dma.sva = iommu_sva_bind_device(dev, ctx->mm_account, flags);
+	if (IS_ERR(ctx->dma.sva)) {
+		rc = PTR_ERR(ctx->dma.sva);
+		goto failed;
+	}
+
+	ctx->dma.pasid = iommu_sva_get_pasid(ctx->dma.sva);
+	if (ctx->dma.pasid == IOMMU_PASID_INVALID) {
+		rc = -EINVAL;
+		goto failed;
+	}
+
+	param.p.pasid = ctx->dma.pasid;
+	param.p.priv = true;
+
+	if (dmaengine_chan_set_attr(ctx->dma.chan, DMA_CHAN_SET_PASID, &param)) {
+		rc = -EINVAL;
+		goto failed;
+	}
+
+	ctx->dma.head = NULL;
+	ctx->dma.tail = NULL;
+
+	return 0;
+
+failed:
+	io_release_dma_chan(ctx);
+	return rc;
+}
+
 static __cold void io_ring_ctx_free(struct io_ring_ctx *ctx)
 {
 	io_sq_thread_finish(ctx);
@@ -9474,6 +9788,8 @@ static __cold void io_ring_ctx_free(struct io_ring_ctx *ctx)
 	}
 #endif
 	WARN_ON_ONCE(!list_empty(&ctx->ltimeout_list));
+
+	io_release_dma_chan(ctx);
 
 	io_mem_free(ctx->rings);
 	io_mem_free(ctx->sq_sqes);
@@ -10165,6 +10481,9 @@ SYSCALL_DEFINE6(io_uring_enter, unsigned int, fd, u32, to_submit,
 		if (submitted != to_submit)
 			goto out;
 	}
+
+	__io_dma_poll(ctx);
+
 	if (flags & IORING_ENTER_GETEVENTS) {
 		const sigset_t __user *sig;
 		struct __kernel_timespec __user *ts;
@@ -10535,6 +10854,12 @@ static __cold int io_uring_create(unsigned entries, struct io_uring_params *p,
 	if (ret)
 		goto err;
 	io_rsrc_node_switch(ctx, NULL);
+
+	ret = io_allocate_dma_chan(ctx, p);
+	if (ret) {
+		pr_info("io_uring was unable to allocate a DMA channel. Offloads unavailable.\n");
+		ret = 0;
+	}
 
 	memset(&p->sq_off, 0, sizeof(p->sq_off));
 	p->sq_off.head = offsetof(struct io_rings, sq.head);
