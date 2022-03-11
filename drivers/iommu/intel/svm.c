@@ -525,6 +525,7 @@ static struct iommu_sva *intel_svm_bind_mm(struct intel_iommu *iommu,
 	struct intel_svm_dev *sdev;
 	struct intel_svm *svm;
 	int ret = 0;
+	pgd_t *pgd;
 	u32 pasid;
 
 	pasid = (flags & IOMMU_SVA_BIND_KERNEL) ? mm->kpasid : mm->pasid;
@@ -590,8 +591,13 @@ static struct iommu_sva *intel_svm_bind_mm(struct intel_iommu *iommu,
 	/* Setup the pasid table: */
 	sflags = (flags & IOMMU_SVA_BIND_KERNEL) ? PASID_FLAG_SUPERVISOR_MODE : 0;
 	sflags |= cpu_feature_enabled(X86_FEATURE_LA57) ? PASID_FLAG_FL5LP : 0;
+	/* If KPTI is on, we need to bind user PGD which is the 2nd 4K of the top PGD */
+	if (flags & IOMMU_SVA_BIND_KERNEL)
+		pgd = mm->pgd;
+	else
+		pgd = kernel_to_user_pgdp(mm->pgd);
 	spin_lock_irqsave(&iommu->lock, iflags);
-	ret = intel_pasid_setup_first_level(iommu, dev, mm->pgd, pasid,
+	ret = intel_pasid_setup_first_level(iommu, dev, pgd, pasid,
 					    FLPT_DEFAULT_DID, sflags);
 	spin_unlock_irqrestore(&iommu->lock, iflags);
 
