@@ -239,6 +239,7 @@ enum idxd_device_flag {
 	IDXD_FLAG_CONFIGURABLE = 0,
 	IDXD_FLAG_CMD_RUNNING,
 	IDXD_FLAG_PASID_ENABLED,
+	IDXD_FLAG_USER_PASID_ENABLED,
 };
 
 struct idxd_dma_dev {
@@ -276,7 +277,6 @@ struct idxd_device {
 	struct idxd_wq **wqs;
 	struct idxd_engine **engines;
 
-	struct iommu_sva *sva;
 	unsigned int pasid;
 
 	int num_groups;
@@ -467,6 +467,11 @@ static inline bool wq_shared(struct idxd_wq *wq)
 static inline bool device_pasid_enabled(struct idxd_device *idxd)
 {
 	return test_bit(IDXD_FLAG_PASID_ENABLED, &idxd->flags);
+}
+
+static inline bool device_user_pasid_enabled(struct idxd_device *idxd)
+{
+	return test_bit(IDXD_FLAG_USER_PASID_ENABLED, &idxd->flags);
 }
 
 static inline bool device_swq_supported(struct idxd_device *idxd)
