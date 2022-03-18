@@ -180,6 +180,7 @@ static int idxd_setup_wqs(struct idxd_device *idxd)
 		wq->max_xfer_bytes = WQ_DEFAULT_MAX_XFER;
 		wq->max_batch_size = WQ_DEFAULT_MAX_BATCH;
 		wq->enqcmds_retries = IDXD_ENQCMDS_RETRIES;
+		wq->chan_count = IDXD_DMA_CHANS;
 		wq->wqcfg = kzalloc_node(idxd->wqcfg_size, GFP_KERNEL, dev_to_node(dev));
 		if (!wq->wqcfg) {
 			put_device(conf_dev);
@@ -593,8 +594,6 @@ static int idxd_pci_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 
 	dev_dbg(dev, "Set DMA masks\n");
 	rc = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(64));
-	if (rc)
-		rc = dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32));
 	if (rc)
 		goto err;
 
