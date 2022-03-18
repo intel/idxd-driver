@@ -509,10 +509,19 @@ out:
 
 static int intel_svm_alloc_pasid(struct device *dev, struct mm_struct *mm, unsigned int flags)
 {
+	int ret = 0;
 	ioasid_t max_pasid = dev_is_pci(dev) ?
 			pci_max_pasids(to_pci_dev(dev)) : intel_pasid_max_id;
 
-	return iommu_sva_alloc_pasid(mm, PASID_MIN, max_pasid - 1, flags);
+	ret = iommu_sva_alloc_pasid(mm, PASID_MIN, max_pasid - 1, flags);
+	/*
+	 * VT-d allows the same device to bind the same PASID multiple times,
+	 * we already have refcount and return the same sva obj.
+	 */
+	if (ret == -EBUSY)
+		ret = 0;
+
+	return ret;
 }
 
 static struct iommu_sva *intel_svm_bind_mm(struct intel_iommu *iommu,
