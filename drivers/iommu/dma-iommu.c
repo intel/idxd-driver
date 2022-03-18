@@ -402,7 +402,7 @@ int iommu_enable_pasid_dma(struct device *dev, ioasid_t *pasid)
 
 	ret = dom->ops->attach_dev_pasid(dom, dev, id);
 	if (ret) {
-		ioasid_put(id);
+		ioasid_free(id);
 		return ret;
 	}
 	*pasid = id;
@@ -431,7 +431,7 @@ void iommu_disable_pasid_dma(struct device *dev, ioasid_t pasid)
 	if (!dom->ops->detach_dev_pasid)
 		return;
 	dom->ops->detach_dev_pasid(dom, dev, pasid);
-	ioasid_put(pasid);
+	ioasid_free(pasid);
 }
 EXPORT_SYMBOL(iommu_disable_pasid_dma);
 

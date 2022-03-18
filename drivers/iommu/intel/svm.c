@@ -1008,8 +1008,6 @@ struct iommu_sva *intel_svm_bind(struct device *dev, struct mm_struct *mm)
 	}
 
 	sva = intel_svm_bind_mm(iommu, dev, mm);
-	if (IS_ERR_OR_NULL(sva))
-		intel_svm_free_pasid(mm);
 	mutex_unlock(&pasid_mutex);
 
 	return sva;
