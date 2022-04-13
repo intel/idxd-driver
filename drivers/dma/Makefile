@@ -11,6 +11,7 @@ obj-$(CONFIG_DMA_OF) += of-dma.o
 
 #dmatest
 obj-$(CONFIG_DMATEST) += dmatest.o
+obj-$(CONFIG_DMATEST) += dmautest.o
 
 #devices
 obj-$(CONFIG_ALTERA_MSGDMA) += altera-msgdma.o
