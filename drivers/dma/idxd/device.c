@@ -392,6 +392,8 @@ static void __idxd_wq_set_pasid_locked(struct idxd_wq *wq, int pasid)
 
 int idxd_wq_set_pasid(struct idxd_wq *wq, int pasid)
 {
+	struct idxd_device *idxd = wq->idxd;
+	struct device *dev = &idxd->pdev->dev;
 	int rc;
 
 	rc = idxd_wq_disable(wq, false);
@@ -399,6 +401,15 @@ int idxd_wq_set_pasid(struct idxd_wq *wq, int pasid)
 		return rc;
 
 	__idxd_wq_set_pasid_locked(wq, pasid);
+
+	idxd_wq_free_irq(wq);
+
+	rc = idxd_wq_request_irq(wq, pasid);
+	if (rc < 0) {
+		idxd->cmd_status = IDXD_SCMD_WQ_IRQ_ERR;
+		dev_dbg(dev, "WQ %d irq setup failed: %d\n", wq->id, rc);
+		return rc;
+	}
 
 	rc = idxd_wq_enable(wq);
 	if (rc < 0)
@@ -1247,7 +1258,7 @@ void idxd_wq_free_irq(struct idxd_wq *wq)
 	ie->pasid = INVALID_IOASID;
 }
 
-int idxd_wq_request_irq(struct idxd_wq *wq)
+int idxd_wq_request_irq(struct idxd_wq *wq, int pasid)
 {
 	struct idxd_device *idxd = wq->idxd;
 	struct pci_dev *pdev = idxd->pdev;
@@ -1260,7 +1271,7 @@ int idxd_wq_request_irq(struct idxd_wq *wq)
 
 	ie = &wq->ie;
 	ie->vector = pci_irq_vector(pdev, ie->id);
-	ie->pasid = device_pasid_enabled(idxd) ? idxd->pasid : INVALID_IOASID;
+	ie->pasid = pasid;
 	idxd_device_set_perm_entry(idxd, ie);
 
 	rc = request_threaded_irq(ie->vector, NULL, idxd_wq_thread, 0, "idxd-portal", ie);
@@ -1388,7 +1399,7 @@ int drv_enable_wq(struct idxd_wq *wq)
 
 	wq->client_count = 0;
 
-	rc = idxd_wq_request_irq(wq);
+	rc = idxd_wq_request_irq(wq, device_pasid_enabled(idxd) ? idxd->pasid : INVALID_IOASID);
 	if (rc < 0) {
 		idxd->cmd_status = IDXD_SCMD_WQ_IRQ_ERR;
 		dev_dbg(dev, "WQ %d irq setup failed: %d\n", wq->id, rc);

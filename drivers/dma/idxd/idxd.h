@@ -628,7 +628,7 @@ void __idxd_wq_quiesce(struct idxd_wq *wq);
 void idxd_wq_quiesce(struct idxd_wq *wq);
 int idxd_wq_init_percpu_ref(struct idxd_wq *wq);
 void idxd_wq_free_irq(struct idxd_wq *wq);
-int idxd_wq_request_irq(struct idxd_wq *wq);
+int idxd_wq_request_irq(struct idxd_wq *wq, int pasid);
 
 /* submission */
 int idxd_submit_desc(struct idxd_wq *wq, struct idxd_desc *desc);
