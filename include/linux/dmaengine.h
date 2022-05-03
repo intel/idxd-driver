@@ -1439,6 +1439,8 @@ static inline void dma_async_issue_pending(struct dma_chan *chan)
  * @last: returns last completed cookie, can be NULL
  * @used: returns last issued cookie, can be NULL
  *
+ * Note: This is deprecated. Use dmaengine_async_is_tx_complete instead.
+ *
  * If @last and @used are passed in, upon return they reflect the most
  * recently submitted (used) cookie and the most recently completed
  * cookie.
@@ -1455,6 +1457,20 @@ static inline enum dma_status dma_async_is_tx_complete(struct dma_chan *chan,
 	if (used)
 		*used = state.used;
 	return status;
+}
+
+/**
+ * dmaengine_async_is_tx_complete - poll for transaction completion
+ * @chan: DMA channel
+ * @cookie: transaction identifier to check status of
+ *
+ */
+static inline enum dma_status dmaengine_async_is_tx_complete(struct dma_chan *chan,
+	dma_cookie_t cookie)
+{
+	struct dma_tx_state state;
+
+	return chan->device->device_tx_status(chan, cookie, &state);
 }
 
 #ifdef CONFIG_DMA_ENGINE
